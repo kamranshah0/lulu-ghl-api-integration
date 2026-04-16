@@ -50,6 +50,7 @@ return [
         'book_interior_url' => env('LULU_BOOK_INTERIOR_URL'),
         'book_cover_url'  => env('LULU_BOOK_COVER_URL'),
         'pod_package_id'  => env('LULU_POD_PACKAGE_ID'),
+        'book_page_count' => env('LULU_BOOK_PAGE_COUNT', 200),
         'shipping_level'  => env('LULU_SHIPPING_LEVEL', 'MAIL'),
     ],
 

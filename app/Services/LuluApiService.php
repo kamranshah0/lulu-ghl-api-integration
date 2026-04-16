@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\LuluApiException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -25,14 +26,10 @@ class LuluApiService
 
     /*
     |--------------------------------------------------------------------------
-    | Authentication — OAuth2 / OpenID Connect
+    | Authentication
     |--------------------------------------------------------------------------
     */
 
-    /**
-     * Get a valid Lulu access token.
-     * Cached for the duration of its validity (minus 60s buffer).
-     */
     public function getAccessToken(): string
     {
         $cacheKey = 'lulu_access_token_' . ($this->useSandbox ? 'sandbox' : 'production');
@@ -49,16 +46,15 @@ class LuluApiService
             ]);
 
             if (! $response->successful()) {
-                Log::error('Lulu: Failed to fetch access token.', [
-                    'status'   => $response->status(),
-                    'response' => $response->json(),
+                Log::channel('lulu')->error('Lulu: Auth token retrieval failed.', [
+                    'status' => $response->status(),
+                    'body'   => $response->body()
                 ]);
-                throw new \RuntimeException('Lulu authentication failed: ' . $response->body());
+                throw new LuluApiException('Lulu authentication failed', $response->status(), $tokenUrl);
             }
 
-            $data = $response->json();
-            Log::info('Lulu: Access token fetched successfully.');
-            return $data['access_token'];
+            Log::channel('lulu')->info('Lulu: Access token refreshed.');
+            return $response->json()['access_token'];
         });
     }
 
@@ -68,20 +64,8 @@ class LuluApiService
     |--------------------------------------------------------------------------
     */
 
-    /**
-     * Create a print job for the given order.
-     *
-     * @param  array $shippingAddress  From Order::getShippingAddressArray()
-     * @param  string $ghlOrderId      Used as external_id for traceability
-     * @param  int    $quantity
-     * @return array  Lulu API response (includes 'id' = lulu_job_id)
-     * @throws \RuntimeException on API failure
-     */
-    public function createPrintJob(
-        array $shippingAddress,
-        string $ghlOrderId,
-        int $quantity = 1
-    ): array {
+    public function createPrintJob(array $shippingAddress, string $ghlOrderId, int $quantity = 1): array
+    {
         $token = $this->getAccessToken();
 
         $payload = [
@@ -94,35 +78,34 @@ class LuluApiService
                     'interior'       => config('services.lulu.book_interior_url'),
                     'pod_package_id' => config('services.lulu.pod_package_id'),
                     'quantity'       => $quantity,
+                    'page_count'     => (int) config('services.lulu.book_page_count', 200),
                 ],
             ],
             'shipping_address' => $shippingAddress,
             'shipping_level'   => config('services.lulu.shipping_level', 'MAIL'),
         ];
 
-        Log::info('Lulu: Creating print job.', [
+        Log::channel('lulu')->info('Lulu: Submitting print job.', [
             'external_id' => $ghlOrderId,
-            'environment' => $this->useSandbox ? 'sandbox' : 'production',
+            'payload'     => $payload
         ]);
 
         $response = Http::withoutVerifying()->withToken($token)
             ->post("{$this->baseUrl}/print-jobs/", $payload);
 
         if (! $response->successful()) {
-            Log::error('Lulu: Print job creation failed.', [
-                'status'      => $response->status(),
-                'response'    => $response->json(),
-                'external_id' => $ghlOrderId,
-            ]);
-            throw new \RuntimeException(
-                'Lulu print job creation failed (HTTP ' . $response->status() . '): ' . $response->body()
+            throw new LuluApiException(
+                message: "Lulu print job creation failed (HTTP {$response->status()})",
+                statusCode: $response->status(),
+                url: "{$this->baseUrl}/print-jobs/",
+                payload: $payload,
+                responseBody: $response->body()
             );
         }
 
         $data = $response->json();
-        Log::info('Lulu: Print job created successfully.', [
-            'lulu_job_id' => $data['id'] ?? 'unknown',
-            'external_id' => $ghlOrderId,
+        Log::channel('lulu')->info('Lulu: Print job created effectively.', [
+            'job_id' => $data['id'] ?? 'unknown'
         ]);
 
         return $data;

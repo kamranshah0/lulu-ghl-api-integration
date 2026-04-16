@@ -49,6 +49,21 @@ class OrderData
         // Calculate total quantity
         $quantity = collect($items)->sum('quantity') ?: 1;
 
+        // Normalize Country (Must be 2-char code)
+        $country = trim($shipping['country'] ?? $payload['country'] ?? 'US');
+        if (strlen($country) > 2) {
+            $countries = ['united states' => 'US', 'united kingdom' => 'GB', 'canada' => 'CA'];
+            $country = $countries[strtolower($country)] ?? substr($country, 0, 2);
+        }
+
+        // Normalize State (Must be 2-char code)
+        $state = trim($shipping['state'] ?? $payload['state'] ?? '');
+        if (strlen($state) > 2) {
+            // Very basic common mapping — in production, use a library or larger map
+            $states = ['california' => 'CA', 'new york' => 'NY', 'texas' => 'TX', 'florida' => 'FL'];
+            $state = $states[strtolower($state)] ?? substr($state, 0, 2);
+        }
+
         return new self(
             ghlOrderId: (string) $ghlOrderId,
             buyerName: trim(
@@ -60,9 +75,9 @@ class OrderData
             address1: $shipping['address1'] ?? $shipping['street1'] ?? $payload['address1'] ?? '',
             address2: $shipping['address2'] ?? $shipping['street2'] ?? null,
             city: $shipping['city'] ?? $payload['city'] ?? '',
-            state: $shipping['state'] ?? $payload['state'] ?? '',
+            state: strtoupper($state),
             zip: $shipping['zip'] ?? $shipping['postalCode'] ?? $payload['shipping_zip'] ?? $payload['postal_code'] ?? $payload['zip'] ?? '',
-            country: $shipping['country'] ?? $payload['country'] ?? 'US',
+            country: strtoupper($country),
             quantity: (int) $quantity,
             amountCharged: isset($order['totalAmount']) ? (float) $order['totalAmount'] : (isset($payload['amount']) ? (float) $payload['amount'] : null),
             contactId: $payload['contactId'] ?? null,

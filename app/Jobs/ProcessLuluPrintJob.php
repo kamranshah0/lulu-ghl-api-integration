@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Order;
 use App\Services\GhlApiService;
 use App\Services\LuluApiService;
+use App\Exceptions\LuluApiException;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -109,16 +110,13 @@ class ProcessLuluPrintJob implements ShouldQueue
             // ── Done ──────────────────────────────────────────────────────
             $order->update(['retry_count' => 0, 'error_message' => null]);
 
+        } catch (LuluApiException $e) {
+            $detailedError = $e->getMessage() . " | Body: " . substr($e->getResponseBody(), 0, 500);
+            $this->handleFailure($order, $e, $detailedError);
         } catch (\Throwable $e) {
             $this->handleFailure($order, $e);
         }
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Failure Handling
-    |--------------------------------------------------------------------------
-    */
 
     /**
      * Called when all retries are exhausted.
@@ -142,12 +140,6 @@ class ProcessLuluPrintJob implements ShouldQueue
         ], 'This order needs manual review.');
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Private Helpers
-    |--------------------------------------------------------------------------
-    */
-
     private function validateOrder(Order $order): void
     {
         $missing = [];
@@ -166,22 +158,23 @@ class ProcessLuluPrintJob implements ShouldQueue
         }
     }
 
-    private function handleFailure(Order $order, \Throwable $e): void
+    private function handleFailure(Order $order, \Throwable $e, ?string $customMessage = null): void
     {
         $attempt = $this->attempts();
+        $errorMessage = $customMessage ?? $e->getMessage();
 
         Log::warning("ProcessLuluPrintJob: Attempt {$attempt} failed for order #{$order->id}", [
-            'error' => $e->getMessage(),
+            'error' => $errorMessage,
         ]);
 
         $order->update([
             'retry_count'  => $attempt,
-            'error_message' => $e->getMessage(),
+            'error_message' => $errorMessage,
         ]);
 
         $order->logEvent('retry_attempted', 'system', [
             'attempt' => $attempt,
-            'error'   => $e->getMessage(),
+            'error'   => $errorMessage,
         ], "Attempt {$attempt} failed. Will retry if attempts remain.");
 
         // Re-throw so Laravel's retry mechanism kicks in
