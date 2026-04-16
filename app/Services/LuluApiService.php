@@ -78,7 +78,6 @@ class LuluApiService
                     'interior'       => config('services.lulu.book_interior_url'),
                     'pod_package_id' => config('services.lulu.pod_package_id'),
                     'quantity'       => $quantity,
-                    'page_count'     => (int) config('services.lulu.book_page_count', 200),
                 ],
             ],
             'shipping_address' => $shippingAddress,
@@ -157,7 +156,8 @@ class LuluApiService
                 [
                     'pod_package_id' => config('services.lulu.pod_package_id'),
                     'quantity'       => $quantity,
-                    'page_count'     => 200, // Approximate — update with real page count
+                    'cover'          => config('services.lulu.book_cover_url'),
+                    'interior'       => config('services.lulu.book_interior_url'),
                 ],
             ],
             'shipping_address' => $shippingAddress,

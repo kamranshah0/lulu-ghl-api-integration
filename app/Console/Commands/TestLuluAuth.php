@@ -46,6 +46,7 @@ class TestLuluAuth extends Command
             $this->info('📦 Starting Full Flight Test (Mock order)...');
             $this->comment('   Target: Beverly Hills Demo Address');
 
+            // This mock address is just for the diagnostic output logic
             $mockAddress = [
                 'name'         => 'Diagnostic Test',
                 'street1'      => '30 N Gould St',
