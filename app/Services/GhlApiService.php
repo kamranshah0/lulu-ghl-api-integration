@@ -19,49 +19,55 @@ class GhlApiService
 
     /**
      * Update a GHL contact's custom field to reflect Lulu order status.
-     * This is optional — use it to sync status back into GHL for CRM visibility.
      *
-     * @param  string $contactId   GHL Contact ID from webhook payload
-     * @param  string $luluJobId   The Lulu job ID to record
-     * @param  string $status      Human-readable status string
+     * @param  string $contactId   GHL Contact ID
+     * @param  string $fieldId     GHL Custom Field ID (e.g. 3sv6UEo51C9B...)
+     * @param  mixed  $value       The value to set
+     */
+    public function updateContactCustomField(string $contactId, string $fieldId, $value): bool
+    {
+        if (empty($this->apiKey) || empty($contactId) || empty($fieldId)) {
+            return false;
+        }
+
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer {$this->apiKey}",
+            'Content-Type'  => 'application/json',
+        ])->put("{$this->baseUrl}/contacts/{$contactId}", [
+            'customField' => [
+                $fieldId => $value,
+            ],
+        ]);
+
+        if (! $response->successful()) {
+            Log::warning('GHL: Failed to update custom field.', [
+                'contact_id' => $contactId,
+                'field_id'   => $fieldId,
+                'response'   => $response->json(),
+            ]);
+        }
+
+        return $response->successful();
+    }
+
+    /**
+     * Backward compatibility wrapper for the status sync command.
      */
     public function updateContactFulfillmentStatus(
         string $contactId,
         string $luluJobId,
         string $status
     ): bool {
-        if (empty($this->apiKey) || empty($contactId)) {
-            Log::warning('GHL: API key or contact ID missing. Skipping GHL update.');
-            return false;
+        $statusFieldId = config('services.ghl.custom_field_id_status');
+        $jobIdFieldId  = config('services.ghl.custom_field_id_job_id');
+
+        if ($statusFieldId) {
+            $this->updateContactCustomField($contactId, $statusFieldId, $status);
         }
 
-        // You need to create a custom field in GHL named "Lulu Job ID" and "Fulfillment Status"
-        // and put their custom_field_ids below
-        $response = Http::withHeaders([
-            'Authorization' => "Bearer {$this->apiKey}",
-            'Content-Type'  => 'application/json',
-        ])->put("{$this->baseUrl}/contacts/{$contactId}", [
-            'customField' => [
-                // Replace these keys with your actual GHL custom field IDs
-                'lulu_job_id'         => $luluJobId,
-                'fulfillment_status'  => $status,
-            ],
-        ]);
-
-        if (! $response->successful()) {
-            Log::warning('GHL: Failed to update contact.', [
-                'contact_id' => $contactId,
-                'status'     => $response->status(),
-                'response'   => $response->json(),
-            ]);
-            return false;
+        if ($jobIdFieldId) {
+            $this->updateContactCustomField($contactId, $jobIdFieldId, $luluJobId);
         }
-
-        Log::info('GHL: Contact updated with Lulu job status.', [
-            'contact_id'  => $contactId,
-            'lulu_job_id' => $luluJobId,
-            'status'      => $status,
-        ]);
 
         return true;
     }

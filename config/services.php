@@ -63,6 +63,8 @@ return [
         'webhook_secret' => env('GHL_WEBHOOK_SECRET'),
         'api_key'        => env('GHL_API_KEY'),
         'location_id'    => env('GHL_LOCATION_ID'),
+        'custom_field_id_status' => env('GHL_CUSTOM_FIELD_ID_STATUS'),
+        'custom_field_id_job_id'  => env('GHL_CUSTOM_FIELD_ID_JOB_ID'),
     ],
 
     /*

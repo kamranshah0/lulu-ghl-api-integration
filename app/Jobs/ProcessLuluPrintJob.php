@@ -6,11 +6,13 @@ use App\Models\Order;
 use App\Services\GhlApiService;
 use App\Services\LuluApiService;
 use App\Exceptions\LuluApiException;
+use App\Mail\OrderConfirmationMail;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class ProcessLuluPrintJob implements ShouldQueue
 {
@@ -66,6 +68,24 @@ class ProcessLuluPrintJob implements ShouldQueue
             // ── Step 1: Validate we have required fields ──────────────────
             $this->validateOrder($order);
 
+            // ── Step 1.5: Calculate Cost ─────────────────────────────
+            try {
+                $costResponse = $luluApi->calculateCost(
+                    shippingAddress: $order->getShippingAddressArray(),
+                    quantity: $order->quantity
+                );
+                
+                $costs = $costResponse['costs'][0] ?? $costResponse['costs'] ?? [];
+                if (!empty($costs)) {
+                    $order->update([
+                        'print_cost_estimate'    => $costs['print_cost'] ?? 0,
+                        'shipping_cost_estimate' => $costs['shipping_cost'] ?? 0,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::warning("ProcessLuluPrintJob: Cost calculation failed for order #{$order->id}: " . $e->getMessage());
+            }
+
             // ── Step 2: Create Lulu Print Job ─────────────────────────────
             $order->logEvent('lulu_api_call_started', 'lulu', [], 'Calling Lulu API to create print job');
 
@@ -105,6 +125,16 @@ class ProcessLuluPrintJob implements ShouldQueue
                     contactId: $order->ghl_contact_id,
                     noteBody: "✅ Forever Wellthy book print job submitted to Lulu. Job ID: {$luluJobId}"
                 );
+            }
+
+            // ── Step 5: Send Confirmation Email ───────────────────────────
+            try {
+                if (!empty($order->buyer_email)) {
+                    Mail::to($order->buyer_email)->send(new OrderConfirmationMail($order));
+                    Log::info("ProcessLuluPrintJob: Confirmation email sent to {$order->buyer_email}");
+                }
+            } catch (\Exception $e) {
+                Log::warning("ProcessLuluPrintJob: Failed to send confirmation email for order #{$order->id}: " . $e->getMessage());
             }
 
             // ── Done ──────────────────────────────────────────────────────
