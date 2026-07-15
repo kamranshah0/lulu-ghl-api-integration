@@ -14,6 +14,8 @@ class DashboardController extends Controller
             'total'      => Order::count(),
             'pending'    => Order::pending()->count(),
             'submitted'  => Order::submitted()->count(),
+            'processing'  => Order::where('fulfillment_status', 'processing')->count(),
+            'in_production' => Order::where('fulfillment_status', 'in_production')->count(),
             'shipped'    => Order::where('fulfillment_status', 'shipped')->count(),
             'failed'     => Order::failed()->count(),
             'today'      => Order::whereDate('created_at', today())->count(),

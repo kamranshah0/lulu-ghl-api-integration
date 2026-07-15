@@ -18,17 +18,16 @@
     <form method="GET" action="{{ route('admin.orders.index') }}" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 1rem; align-items: end;">
         <div>
             <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Search Records</label>
-            <input type="text" name="search" value="{{ request('search') }}" placeholder="Name, email, or GHL ID..." 
+            <input type="text" name="search" value="{{ request('search') }}" placeholder="Name, email, GHL, Lulu, city, state, zip..." 
                    style="width: 100%; padding: 0.75rem; border: 1.5px solid var(--border); border-radius: 0.75rem; font-size: 0.875rem; background: #fafafa;">
         </div>
         <div>
             <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Status</label>
             <select name="status" style="width: 100%; padding: 0.75rem; border: 1.5px solid var(--border); border-radius: 0.75rem; font-size: 0.875rem; background: #fafafa;">
                 <option value="">All Statuses</option>
-                <option value="received" {{ request('status') == 'received' ? 'selected' : '' }}>Received</option>
-                <option value="processing" {{ request('status') == 'processing' ? 'selected' : '' }}>Processing</option>
-                <option value="print_job_created" {{ request('status') == 'print_job_created' ? 'selected' : '' }}>Submitted</option>
-                <option value="failed" {{ request('status') == 'failed' ? 'selected' : '' }}>Failed</option>
+                @foreach($statuses as $value => $label)
+                    <option value="{{ $value }}" {{ request('status') == $value ? 'selected' : '' }}>{{ $label }}</option>
+                @endforeach
             </select>
         </div>
         <div>
@@ -50,6 +49,7 @@
                 <tr>
                     <th style="padding-left: 1.5rem;">GHL Order ID</th>
                     <th>Customer Details</th>
+                    <th>Shipping</th>
                     <th>Fulfillment Status</th>
                     <th>Lulu Job</th>
                     <th>Total</th>
@@ -66,6 +66,13 @@
                         <div style="font-size: 0.75rem; color: var(--text-muted);">{{ $order->buyer_email }}</div>
                     </td>
                     <td>
+                        <div style="font-weight: 600; color: var(--text-main);">{{ $order->shipping_city ?: 'Missing city' }}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            {{ $order->shipping_state ?: 'Missing state' }} {{ $order->shipping_zip }}
+                            {{ strtoupper($order->shipping_country ?? '') }}
+                        </div>
+                    </td>
+                    <td>
                         <span class="badge 
                             @if($order->fulfillment_status == 'print_job_created') badge-success 
                             @elseif($order->fulfillment_status == 'failed') badge-danger 
@@ -73,10 +80,18 @@
                             @else badge-info @endif">
                             {{ str_replace('_', ' ', $order->fulfillment_status) }}
                         </span>
+                        @if($order->error_message)
+                            <div style="font-size: 0.72rem; color: var(--danger); margin-top: 0.4rem; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                {{ $order->error_message }}
+                            </div>
+                        @endif
                     </td>
                     <td>
                         @if($order->lulu_job_id)
                             <code style="background: #f1f5f9; padding: 0.25rem 0.5rem; border-radius: 0.375rem; font-size: 0.75rem; font-weight: 600;">{{ $order->lulu_job_id }}</code>
+                            @if($order->lulu_status)
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.4rem;">{{ $order->lulu_status }}</div>
+                            @endif
                         @else
                             <span style="color: var(--text-muted); font-size: 0.75rem;">Pending</span>
                         @endif
@@ -89,7 +104,7 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 5rem; color: var(--text-muted);">
+                    <td colspan="8" style="text-align: center; padding: 5rem; color: var(--text-muted);">
                         <div style="margin-bottom: 1rem; color: var(--border);">
                             <i data-lucide="search-x" style="width: 48px; height: 48px;"></i>
                         </div>

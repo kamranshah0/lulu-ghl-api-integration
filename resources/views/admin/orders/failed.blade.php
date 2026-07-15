@@ -25,6 +25,7 @@
                 <tr>
                     <th style="padding-left: 1.5rem;">Order Reference</th>
                     <th>Customer</th>
+                    <th>Shipping</th>
                     <th>Failure Reason</th>
                     <th style="text-align: center;">Retries</th>
                     <th>Timestamp</th>
@@ -38,6 +39,13 @@
                     <td>
                         <div style="font-weight: 600; color: var(--text-main);">{{ $order->buyer_name }}</div>
                         <div style="font-size: 0.75rem; color: var(--text-muted);">{{ $order->buyer_email }}</div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600; color: var(--text-main);">{{ $order->shipping_city ?: 'Missing city' }}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            {{ $order->shipping_state ?: 'Missing state' }} {{ $order->shipping_zip }}
+                            {{ strtoupper($order->shipping_country ?? '') }}
+                        </div>
                     </td>
                     <td style="max-width: 320px;">
                         <div style="color: #991b1b; font-size: 0.8125rem; font-weight: 600; background: #fff1f2; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #fee2e2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">

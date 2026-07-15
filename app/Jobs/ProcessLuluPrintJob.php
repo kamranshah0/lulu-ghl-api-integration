@@ -56,7 +56,7 @@ class ProcessLuluPrintJob implements ShouldQueue
         ]);
 
         // ── Guard: Skip if already submitted ──────────────────────────────
-        if (in_array($order->fulfillment_status, ['submitted_to_lulu', 'print_job_created', 'shipped'])) {
+        if (in_array($order->fulfillment_status, ['submitted_to_lulu', 'print_job_created', 'in_production', 'shipped'])) {
             Log::info("ProcessLuluPrintJob: Order #{$order->id} already processed. Skipping.");
             return;
         }
@@ -84,6 +84,10 @@ class ProcessLuluPrintJob implements ShouldQueue
                 }
             } catch (\Exception $e) {
                 Log::warning("ProcessLuluPrintJob: Cost calculation failed for order #{$order->id}: " . $e->getMessage());
+                $order->logEvent('lulu_cost_calculation_failed', 'lulu', [
+                    'error' => $e->getMessage(),
+                    'shipping_address' => $order->getShippingAddressArray(),
+                ], 'Lulu cost calculation failed. Print job submission will still be attempted.');
             }
 
             // ── Step 2: Create Lulu Print Job ─────────────────────────────
@@ -116,15 +120,27 @@ class ProcessLuluPrintJob implements ShouldQueue
 
             // ── Step 4: Optional — Update GHL Contact ─────────────────────
             if ($order->ghl_contact_id) {
-                $ghlApi->updateContactFulfillmentStatus(
-                    contactId: $order->ghl_contact_id,
-                    luluJobId: $luluJobId,
-                    status: 'Print Job Created'
-                );
-                $ghlApi->addContactNote(
-                    contactId: $order->ghl_contact_id,
-                    noteBody: "✅ Forever Wellthy book print job submitted to Lulu. Job ID: {$luluJobId}"
-                );
+                try {
+                    $ghlStatusUpdated = $ghlApi->updateContactFulfillmentStatus(
+                        contactId: $order->ghl_contact_id,
+                        luluJobId: $luluJobId,
+                        status: 'Print Job Created'
+                    );
+                    $ghlNoteAdded = $ghlApi->addContactNote(
+                        contactId: $order->ghl_contact_id,
+                        noteBody: "✅ Forever Wellthy book print job submitted to Lulu. Job ID: {$luluJobId}"
+                    );
+
+                    $order->logEvent('ghl_status_synced', 'ghl', [
+                        'status_updated' => $ghlStatusUpdated,
+                        'note_added' => $ghlNoteAdded,
+                    ], 'GHL contact was updated with Lulu print job details.');
+                } catch (\Throwable $e) {
+                    Log::warning("ProcessLuluPrintJob: GHL update failed for order #{$order->id}: " . $e->getMessage());
+                    $order->logEvent('ghl_status_sync_failed', 'ghl', [
+                        'error' => $e->getMessage(),
+                    ], 'Lulu job was created, but GHL contact update failed.');
+                }
             }
 
             // ── Step 5: Send Confirmation Email ───────────────────────────
@@ -141,7 +157,7 @@ class ProcessLuluPrintJob implements ShouldQueue
             $order->update(['retry_count' => 0, 'error_message' => null]);
 
         } catch (LuluApiException $e) {
-            $detailedError = $e->getMessage() . " | Body: " . substr($e->getResponseBody(), 0, 500);
+            $detailedError = $this->summarizeLuluApiException($e);
             $this->handleFailure($order, $e, $detailedError);
         } catch (\Throwable $e) {
             $this->handleFailure($order, $e);
@@ -180,10 +196,23 @@ class ProcessLuluPrintJob implements ShouldQueue
         if (empty($order->shipping_city))   $missing[] = 'shipping_city';
         if (empty($order->shipping_zip))    $missing[] = 'shipping_zip';
         if (empty($order->shipping_country)) $missing[] = 'shipping_country';
+        if (in_array(strtoupper((string) $order->shipping_country), ['US', 'CA']) && empty($order->shipping_state)) {
+            $missing[] = 'shipping_state';
+        }
 
         if (! empty($missing)) {
             throw new \InvalidArgumentException(
                 'Order is missing required fields: ' . implode(', ', $missing)
+            );
+        }
+
+        if (strlen((string) $order->shipping_country) !== 2) {
+            throw new \InvalidArgumentException('Shipping country must be a 2-letter ISO code for Lulu.');
+        }
+
+        if (!empty($order->shipping_state) && strlen((string) $order->shipping_state) !== 2) {
+            throw new \InvalidArgumentException(
+                "Shipping state must be a 2-letter code for Lulu. Current value: {$order->shipping_state}"
             );
         }
     }
@@ -198,16 +227,42 @@ class ProcessLuluPrintJob implements ShouldQueue
         ]);
 
         $order->update([
-            'retry_count'  => $attempt,
-            'error_message' => $errorMessage,
+            'fulfillment_status' => 'failed',
+            'retry_count'        => $attempt,
+            'error_message'      => $errorMessage,
         ]);
 
-        $order->logEvent('retry_attempted', 'system', [
+        $order->logEvent($e instanceof LuluApiException ? 'lulu_job_failed' : 'retry_attempted', $e instanceof LuluApiException ? 'lulu' : 'system', [
             'attempt' => $attempt,
             'error'   => $errorMessage,
+            'shipping_address' => $order->getShippingAddressArray(),
         ], "Attempt {$attempt} failed. Will retry if attempts remain.");
 
         // Re-throw so Laravel's retry mechanism kicks in
         throw $e;
+    }
+
+    private function summarizeLuluApiException(LuluApiException $e): string
+    {
+        $body = $e->getResponseBody();
+        $decoded = is_string($body) ? json_decode($body, true) : null;
+        $message = null;
+
+        if (is_array($decoded)) {
+            $message = $decoded['detail']
+                ?? $decoded['message']
+                ?? $decoded['error_description']
+                ?? $decoded['error']
+                ?? null;
+
+            if (!$message && !empty($decoded['errors'])) {
+                $message = json_encode($decoded['errors']);
+            }
+        }
+
+        $summary = $message ?: trim((string) $body);
+        $summary = $summary !== '' ? substr($summary, 0, 500) : 'No response body returned.';
+
+        return "{$e->getMessage()} | Lulu response: {$summary}";
     }
 }

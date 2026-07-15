@@ -32,13 +32,20 @@ class OrderData
 
         $order    = $payload['order']    ?? $payload;
         $customer = $order['customer']   ?? $payload;
-        $shipping = $order['shippingAddress'] ?? $order['shipping'] ?? $payload;
+        $shipping = $order['shippingAddress']
+            ?? $order['shipping_address']
+            ?? $order['shipping']
+            ?? $payload['shippingAddress']
+            ?? $payload['shipping_address']
+            ?? $payload['shipping']
+            ?? $payload;
         $items    = $order['items']      ?? $order['line_items'] ?? [];
 
         // GHL Order ID (check all possible locations)
         $ghlOrderId = $order['id'] 
             ?? $order['order_id']
             ?? $payload['orderId'] 
+            ?? $payload['order_id']
             ?? $payload['id'] 
             ?? ($items[0]['meta']['order_id'] ?? null);
         
@@ -47,41 +54,176 @@ class OrderData
         }
 
         // Calculate total quantity
-        $quantity = collect($items)->sum('quantity') ?: 1;
+        $quantity = collect($items)->sum(fn ($item) => (int) ($item['quantity'] ?? $item['qty'] ?? 0)) ?: 1;
 
         // Normalize Country (Must be 2-char code)
-        $country = trim($shipping['country'] ?? $payload['country'] ?? 'US');
-        if (strlen($country) > 2) {
-            $countries = ['united states' => 'US', 'united kingdom' => 'GB', 'canada' => 'CA'];
-            $country = $countries[strtolower($country)] ?? substr($country, 0, 2);
-        }
+        $country = self::normalizeCountry(self::firstFilled($shipping, $payload, [
+            'country_code',
+            'countryCode',
+            'shipping_country',
+            'country',
+        ]) ?? 'US');
 
         // Normalize State (Must be 2-char code)
-        $state = trim($shipping['state'] ?? $payload['state'] ?? '');
-        if (strlen($state) > 2) {
-            // Very basic common mapping — in production, use a library or larger map
-            $states = ['california' => 'CA', 'new york' => 'NY', 'texas' => 'TX', 'florida' => 'FL'];
-            $state = $states[strtolower($state)] ?? substr($state, 0, 2);
-        }
+        $state = self::normalizeState(self::firstFilled($shipping, $payload, [
+            'state_code',
+            'stateCode',
+            'province_code',
+            'provinceCode',
+            'shipping_state',
+            'state',
+            'province',
+            'region',
+        ]), $country);
 
         return new self(
             ghlOrderId: (string) $ghlOrderId,
-            buyerName: trim(
-                ($customer['firstName'] ?? $payload['first_name'] ?? '') . ' ' .
-                ($customer['lastName'] ?? $payload['last_name'] ?? '')
-            ) ?: 'Unknown Customer',
-            buyerEmail: $customer['email'] ?? $payload['email'] ?? 'no-email@example.com',
-            buyerPhone: $customer['phone'] ?? $payload['phone'] ?? null,
-            address1: $shipping['address1'] ?? $shipping['street1'] ?? $payload['address1'] ?? '',
-            address2: $shipping['address2'] ?? $shipping['street2'] ?? null,
-            city: $shipping['city'] ?? $payload['city'] ?? '',
-            state: strtoupper($state),
-            zip: $shipping['zip'] ?? $shipping['postalCode'] ?? $payload['shipping_zip'] ?? $payload['postal_code'] ?? $payload['zip'] ?? '',
-            country: strtoupper($country),
+            buyerName: self::buildBuyerName($customer, $payload),
+            buyerEmail: self::firstFilled($customer, $payload, ['email', 'buyer_email', 'customer_email']) ?? 'no-email@example.com',
+            buyerPhone: self::firstFilled($customer, $payload, ['phone', 'phone_number', 'buyer_phone']),
+            address1: self::firstFilled($shipping, $payload, ['address1', 'street1', 'line1', 'address', 'shipping_address1']) ?? '',
+            address2: self::firstFilled($shipping, $payload, ['address2', 'street2', 'line2', 'shipping_address2']),
+            city: self::firstFilled($shipping, $payload, ['city', 'shipping_city']) ?? '',
+            state: $state,
+            zip: self::firstFilled($shipping, $payload, [
+                'zip',
+                'postalCode',
+                'postal_code',
+                'postcode',
+                'shipping_zip',
+            ]) ?? '',
+            country: $country,
             quantity: (int) $quantity,
             amountCharged: isset($order['totalAmount']) ? (float) $order['totalAmount'] : (isset($payload['amount']) ? (float) $payload['amount'] : null),
-            contactId: $payload['contactId'] ?? null,
+            contactId: $payload['contactId'] ?? $payload['contact_id'] ?? $customer['contactId'] ?? null,
             rawPayload: $payload
         );
+    }
+
+    private static function buildBuyerName(array $customer, array $payload): string
+    {
+        $fullName = self::firstFilled($customer, $payload, ['name', 'full_name', 'buyer_name']);
+
+        if ($fullName) {
+            return $fullName;
+        }
+
+        return trim(
+            (string) self::firstFilled($customer, $payload, ['firstName', 'first_name', 'first']) . ' ' .
+            (string) self::firstFilled($customer, $payload, ['lastName', 'last_name', 'last'])
+        ) ?: 'Unknown Customer';
+    }
+
+    private static function firstFilled(array $primary, array $fallback, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            $value = $primary[$key] ?? $fallback[$key] ?? null;
+
+            if ($value !== null && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
+    }
+
+    private static function normalizeCountry(string $country): string
+    {
+        $value = strtolower(trim($country));
+
+        $countries = [
+            'usa' => 'US',
+            'u.s.' => 'US',
+            'u.s.a.' => 'US',
+            'united states' => 'US',
+            'united states of america' => 'US',
+            'canada' => 'CA',
+            'united kingdom' => 'GB',
+            'great britain' => 'GB',
+        ];
+
+        return $countries[$value] ?? strtoupper(substr(trim($country), 0, 2));
+    }
+
+    public static function normalizeState(?string $state, string $country = 'US'): string
+    {
+        $state = trim((string) $state);
+
+        if ($state === '') {
+            return '';
+        }
+
+        if (strlen($state) === 2) {
+            return strtoupper($state);
+        }
+
+        $key = strtolower(str_replace(['.', '_'], ['', ' '], $state));
+        $key = preg_replace('/\s+/', ' ', $key);
+
+        if (strtoupper($country) === 'US') {
+            return self::usStateMap()[$key] ?? strtoupper($state);
+        }
+
+        return strtoupper($state);
+    }
+
+    private static function usStateMap(): array
+    {
+        return [
+            'alabama' => 'AL',
+            'alaska' => 'AK',
+            'arizona' => 'AZ',
+            'arkansas' => 'AR',
+            'california' => 'CA',
+            'colorado' => 'CO',
+            'connecticut' => 'CT',
+            'delaware' => 'DE',
+            'district of columbia' => 'DC',
+            'florida' => 'FL',
+            'georgia' => 'GA',
+            'hawaii' => 'HI',
+            'idaho' => 'ID',
+            'illinois' => 'IL',
+            'indiana' => 'IN',
+            'iowa' => 'IA',
+            'kansas' => 'KS',
+            'kentucky' => 'KY',
+            'louisiana' => 'LA',
+            'maine' => 'ME',
+            'maryland' => 'MD',
+            'massachusetts' => 'MA',
+            'michigan' => 'MI',
+            'minnesota' => 'MN',
+            'mississippi' => 'MS',
+            'missouri' => 'MO',
+            'missori' => 'MO',
+            'missroii' => 'MO',
+            'missourii' => 'MO',
+            'montana' => 'MT',
+            'nebraska' => 'NE',
+            'nevada' => 'NV',
+            'new hampshire' => 'NH',
+            'new jersey' => 'NJ',
+            'new mexico' => 'NM',
+            'new york' => 'NY',
+            'north carolina' => 'NC',
+            'north dakota' => 'ND',
+            'ohio' => 'OH',
+            'oklahoma' => 'OK',
+            'oregon' => 'OR',
+            'pennsylvania' => 'PA',
+            'rhode island' => 'RI',
+            'south carolina' => 'SC',
+            'south dakota' => 'SD',
+            'tennessee' => 'TN',
+            'texas' => 'TX',
+            'utah' => 'UT',
+            'vermont' => 'VT',
+            'virginia' => 'VA',
+            'washington' => 'WA',
+            'west virginia' => 'WV',
+            'wisconsin' => 'WI',
+            'wyoming' => 'WY',
+        ];
     }
 }

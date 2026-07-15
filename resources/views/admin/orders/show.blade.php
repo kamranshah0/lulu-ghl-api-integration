@@ -99,7 +99,24 @@
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Batch Quantity</label>
                 <p style="font-weight: 800; font-size: 1.125rem;">{{ $order->quantity }} x Unit</p>
             </div>
+            <div>
+                <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Print Cost Est.</label>
+                <p style="font-weight: 700; color: var(--text-main);">${{ number_format((float) $order->print_cost_estimate, 2) }}</p>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Shipping Cost Est.</label>
+                <p style="font-weight: 700; color: var(--text-main);">${{ number_format((float) $order->shipping_cost_estimate, 2) }}</p>
+            </div>
         </div>
+
+        <details style="margin-top: 2rem; border: 1px solid var(--border); border-radius: 0.75rem; overflow: hidden;">
+            <summary style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; font-weight: 800; padding: 0.75rem 1rem; background: #fafafa; display: flex; align-items: center; gap: 0.5rem; user-select: none;">
+                <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i> Lulu Shipping Payload
+            </summary>
+            <div style="padding: 1rem; background: #1e293b; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; overflow-x: auto;">
+                <pre style="line-height: 1.6;">{{ json_encode($order->getShippingAddressArray(), JSON_PRETTY_PRINT) }}</pre>
+            </div>
+        </details>
 
         @if($order->error_message)
         <div style="margin-top: 2.5rem; padding: 1.5rem; background: #fff1f2; border: 1px solid #fda4af; border-radius: 1rem; display: flex; gap: 1rem; align-items: flex-start;">

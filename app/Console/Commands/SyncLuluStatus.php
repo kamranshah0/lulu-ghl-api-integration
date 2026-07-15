@@ -65,6 +65,14 @@ class SyncLuluStatus extends Command
                 }
             } catch (\Exception $e) {
                 $this->error("❌ Failed to sync order #{$order->id}: {$e->getMessage()}");
+                Log::warning("SyncLuluStatus: Failed to sync order #{$order->id}", [
+                    'lulu_job_id' => $order->lulu_job_id,
+                    'error' => $e->getMessage(),
+                ]);
+                $order->logEvent('lulu_status_sync_failed', 'lulu', [
+                    'lulu_job_id' => $order->lulu_job_id,
+                    'error' => $e->getMessage(),
+                ], 'Failed to fetch latest Lulu status.');
             }
         }
 
@@ -103,7 +111,7 @@ class SyncLuluStatus extends Command
         $order->save();
 
         // Log the change
-        $order->logEvent('status_synced', 'lulu_api', [
+        $order->logEvent('status_synced', 'lulu', [
             'old_lulu_status' => $oldStatus,
             'new_lulu_status' => $luluStatus,
             'full_response'   => $fullData
@@ -111,11 +119,21 @@ class SyncLuluStatus extends Command
 
         // Sync to GHL
         if ($order->ghl_contact_id) {
-            $this->ghlApi->updateContactFulfillmentStatus(
-                $order->ghl_contact_id,
-                $order->lulu_job_id,
-                $luluStatus
-            );
+            try {
+                $this->ghlApi->updateContactFulfillmentStatus(
+                    $order->ghl_contact_id,
+                    $order->lulu_job_id,
+                    $luluStatus
+                );
+            } catch (\Throwable $e) {
+                Log::warning("SyncLuluStatus: Failed to sync GHL for order #{$order->id}", [
+                    'error' => $e->getMessage(),
+                ]);
+                $order->logEvent('ghl_status_sync_failed', 'ghl', [
+                    'error' => $e->getMessage(),
+                    'lulu_status' => $luluStatus,
+                ], 'Lulu status changed locally, but GHL update failed.');
+            }
         }
     }
 
