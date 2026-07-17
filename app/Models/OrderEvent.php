@@ -47,6 +47,8 @@ class OrderEvent extends Model
             'ghl_status_sync_failed'  => '⚠️ GHL Status Sync Failed',
             'confirmation_email_sent' => '✉️ Confirmation Email Sent',
             'confirmation_email_failed' => '⚠️ Confirmation Email Failed',
+            'admin_notification_email_sent' => '✉️ Admin Notification Email Sent',
+            'admin_notification_email_failed' => '⚠️ Admin Notification Email Failed',
             'status_synced'           => '🔄 Lulu Status Synced',
             'retry_attempted'         => '🔁 Retry Attempt',
             'max_retries_exceeded'    => '💀 Max Retries Exceeded',

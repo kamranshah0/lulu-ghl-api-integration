@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Order;
+use App\Mail\AdminOrderNotificationMail;
 use App\Services\GhlApiService;
 use App\Services\LuluApiService;
 use App\Exceptions\LuluApiException;
@@ -168,6 +169,32 @@ class ProcessLuluPrintJob implements ShouldQueue
                     'mailer' => config('mail.default'),
                     'error' => $e->getMessage(),
                 ], 'Order confirmation email could not be sent.');
+            }
+
+            // ── Step 6: Notify Admin ──────────────────────────────────────
+            try {
+                $adminEmail = config('services.admin.email');
+
+                if (!empty($adminEmail)) {
+                    Mail::to($adminEmail)->send(new AdminOrderNotificationMail($order->fresh()));
+                    Log::info("ProcessLuluPrintJob: Admin notification email sent to {$adminEmail}");
+                    $order->logEvent('admin_notification_email_sent', 'system', [
+                        'to' => $adminEmail,
+                        'mailer' => config('mail.default'),
+                    ], 'Admin notification email was sent.');
+                } else {
+                    $order->logEvent('admin_notification_email_failed', 'system', [
+                        'mailer' => config('mail.default'),
+                        'error' => 'ADMIN_EMAIL is not configured.',
+                    ], 'Admin notification email could not be sent because ADMIN_EMAIL is missing.');
+                }
+            } catch (\Exception $e) {
+                Log::warning("ProcessLuluPrintJob: Failed to send admin notification email for order #{$order->id}: " . $e->getMessage());
+                $order->logEvent('admin_notification_email_failed', 'system', [
+                    'to' => config('services.admin.email'),
+                    'mailer' => config('mail.default'),
+                    'error' => $e->getMessage(),
+                ], 'Admin notification email could not be sent.');
             }
 
             // ── Done ──────────────────────────────────────────────────────
