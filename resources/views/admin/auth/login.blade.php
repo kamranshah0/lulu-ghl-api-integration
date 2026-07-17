@@ -173,7 +173,7 @@
         <div class="header">
             <div class="logo-box">F</div>
             <h1>Welcome Back</h1>
-            <p>Middleware Integration Portal</p>
+            <p>Forever Wellthy Portal</p>
         </div>
 
         @if($errors->any())

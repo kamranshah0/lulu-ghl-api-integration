@@ -20,7 +20,7 @@ class AdminOrderNotificationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: "New Lulu Print Job Created - Order #{$this->order->id}",
+            subject: "New Forever Wellthy Book Order #{$this->order->id}",
         );
     }
 

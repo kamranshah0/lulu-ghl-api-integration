@@ -29,7 +29,7 @@ class OrderConfirmationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Order Confirmation - Forever Wellthy',
+            subject: 'Your Forever Wellthy Order Is Confirmed',
         );
     }
 
