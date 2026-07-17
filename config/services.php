@@ -73,7 +73,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'admin' => [
-        'email'    => env('ADMIN_EMAIL', 'admin@app.forever-wellthy.com'),
+        'email'    => env('ADMIN_EMAIL', 'flechepheno@yahoo.fr'),
         'password' => env('ADMIN_PASSWORD', 'changeme123'),
     ],
 
