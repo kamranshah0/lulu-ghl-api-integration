@@ -74,13 +74,21 @@ class ProcessLuluPrintJob implements ShouldQueue
                     shippingAddress: $order->getShippingAddressArray(),
                     quantity: $order->quantity
                 );
-                
-                $costs = $costResponse['costs'][0] ?? $costResponse['costs'] ?? [];
-                if (!empty($costs)) {
+
+                $costs = LuluApiService::extractCostBreakdown($costResponse);
+                if ($costs['print_cost'] !== null || $costs['shipping_cost'] !== null) {
                     $order->update([
-                        'print_cost_estimate'    => $costs['print_cost'] ?? 0,
-                        'shipping_cost_estimate' => $costs['shipping_cost'] ?? 0,
+                        'print_cost_estimate'    => $costs['print_cost'],
+                        'shipping_cost_estimate' => $costs['shipping_cost'],
                     ]);
+                    $order->logEvent('lulu_cost_calculated', 'lulu', [
+                        'parsed_costs' => $costs,
+                        'raw_response' => $costResponse,
+                    ], 'Lulu print and shipping cost estimates were stored.');
+                } else {
+                    $order->logEvent('lulu_cost_calculation_failed', 'lulu', [
+                        'raw_response' => $costResponse,
+                    ], 'Lulu cost response did not contain recognizable print/shipping cost fields.');
                 }
             } catch (\Exception $e) {
                 Log::warning("ProcessLuluPrintJob: Cost calculation failed for order #{$order->id}: " . $e->getMessage());
@@ -148,9 +156,18 @@ class ProcessLuluPrintJob implements ShouldQueue
                 if (!empty($order->buyer_email)) {
                     Mail::to($order->buyer_email)->send(new OrderConfirmationMail($order));
                     Log::info("ProcessLuluPrintJob: Confirmation email sent to {$order->buyer_email}");
+                    $order->logEvent('confirmation_email_sent', 'system', [
+                        'to' => $order->buyer_email,
+                        'mailer' => config('mail.default'),
+                    ], 'Order confirmation email was sent.');
                 }
             } catch (\Exception $e) {
                 Log::warning("ProcessLuluPrintJob: Failed to send confirmation email for order #{$order->id}: " . $e->getMessage());
+                $order->logEvent('confirmation_email_failed', 'system', [
+                    'to' => $order->buyer_email,
+                    'mailer' => config('mail.default'),
+                    'error' => $e->getMessage(),
+                ], 'Order confirmation email could not be sent.');
             }
 
             // ── Done ──────────────────────────────────────────────────────

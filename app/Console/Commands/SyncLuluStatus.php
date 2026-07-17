@@ -57,6 +57,8 @@ class SyncLuluStatus extends Command
 
         foreach ($orders as $order) {
             try {
+                $this->syncMissingCostEstimate($order);
+
                 $statusData = $this->luluApi->getPrintJobStatus($order->lulu_job_id);
                 $newStatus = $statusData['status']['name'] ?? 'UNKNOWN';
 
@@ -78,6 +80,39 @@ class SyncLuluStatus extends Command
 
         $this->info('🏁 Sync complete.');
         return 0;
+    }
+
+    protected function syncMissingCostEstimate(Order $order): void
+    {
+        if ($order->print_cost_estimate !== null && $order->shipping_cost_estimate !== null) {
+            return;
+        }
+
+        try {
+            $costResponse = $this->luluApi->calculateCost(
+                shippingAddress: $order->getShippingAddressArray(),
+                quantity: $order->quantity
+            );
+            $costs = LuluApiService::extractCostBreakdown($costResponse);
+
+            if ($costs['print_cost'] !== null || $costs['shipping_cost'] !== null) {
+                $order->update([
+                    'print_cost_estimate' => $costs['print_cost'],
+                    'shipping_cost_estimate' => $costs['shipping_cost'],
+                ]);
+                $order->logEvent('lulu_cost_calculated', 'lulu', [
+                    'parsed_costs' => $costs,
+                    'raw_response' => $costResponse,
+                ], 'Missing Lulu cost estimates were backfilled during status sync.');
+            }
+        } catch (\Throwable $e) {
+            Log::warning("SyncLuluStatus: Failed to backfill costs for order #{$order->id}", [
+                'error' => $e->getMessage(),
+            ]);
+            $order->logEvent('lulu_cost_calculation_failed', 'lulu', [
+                'error' => $e->getMessage(),
+            ], 'Could not backfill Lulu cost estimates during status sync.');
+        }
     }
 
     /**

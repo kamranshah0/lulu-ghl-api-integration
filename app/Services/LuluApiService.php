@@ -76,7 +76,7 @@ class LuluApiService
                     'title'          => 'Forever Wellthy Book',
                     'cover'          => config('services.lulu.book_cover_url'),
                     'interior'       => config('services.lulu.book_interior_url'),
-                    'pod_package_id' => config('services.lulu.pod_package_id'),
+                    'pod_package_id' => $this->podPackageId(),
                     'quantity'       => $quantity,
                 ],
             ],
@@ -154,10 +154,11 @@ class LuluApiService
         $payload = [
             'line_items' => [
                 [
-                    'pod_package_id' => config('services.lulu.pod_package_id'),
+                    'pod_package_id' => $this->podPackageId(),
                     'quantity'       => $quantity,
                     'cover'          => config('services.lulu.book_cover_url'),
                     'interior'       => config('services.lulu.book_interior_url'),
+                    'page_count'     => (int) config('services.lulu.book_page_count', 60),
                 ],
             ],
             'shipping_address' => $shippingAddress,
@@ -170,11 +171,105 @@ class LuluApiService
         if (! $response->successful()) {
             Log::warning('Lulu: Cost calculation failed (non-blocking).', [
                 'status'   => $response->status(),
-                'response' => $response->json(),
+                'payload'  => $payload,
+                'response' => $response->json() ?? $response->body(),
             ]);
-            return [];
+            throw new LuluApiException(
+                message: "Lulu cost calculation failed (HTTP {$response->status()})",
+                statusCode: $response->status(),
+                url: "{$this->baseUrl}/print-job-cost-calculations/",
+                payload: $payload,
+                responseBody: $response->body()
+            );
         }
 
-        return $response->json();
+        $data = $response->json();
+        Log::channel('lulu')->info('Lulu: Cost calculation completed.', [
+            'cost_response' => $data,
+        ]);
+
+        return $data;
+    }
+
+    public static function extractCostBreakdown(array $costResponse): array
+    {
+        $costs = $costResponse['costs'][0] ?? $costResponse['costs'] ?? $costResponse;
+        $firstLineItem = $costResponse['line_item_costs'][0]
+            ?? $costResponse['line_items'][0]
+            ?? $costs['line_item_costs'][0]
+            ?? [];
+
+        $printCost = self::moneyValue($costs['print_cost'] ?? null)
+            ?? self::moneyValue($firstLineItem['print_cost'] ?? null)
+            ?? self::moneyValue($firstLineItem['total_cost_excl_tax'] ?? null)
+            ?? self::moneyValue($firstLineItem['total_cost_incl_tax'] ?? null)
+            ?? self::moneyValue($costs['line_item_cost'] ?? null)
+            ?? self::moneyValue($costs['total_print_cost'] ?? null);
+
+        $shippingCost = self::moneyValue($costs['shipping_cost'] ?? null)
+            ?? self::moneyValue($costResponse['shipping_cost'] ?? null)
+            ?? self::moneyValue($costs['shipping'] ?? null)
+            ?? self::moneyValue($costResponse['shipping'] ?? null)
+            ?? self::moneyValue($costs['total_shipping_cost'] ?? null);
+
+        return [
+            'print_cost' => $printCost,
+            'shipping_cost' => $shippingCost,
+        ];
+    }
+
+    private static function moneyValue(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return (float) $value;
+        }
+
+        if (is_string($value)) {
+            $normalized = preg_replace('/[^0-9.\-]/', '', $value);
+            return is_numeric($normalized) ? (float) $normalized : null;
+        }
+
+        if (!is_array($value)) {
+            return null;
+        }
+
+        foreach ([
+            'amount',
+            'value',
+            'total',
+            'total_cost_excl_tax',
+            'total_cost_incl_tax',
+            'cost_excl_tax',
+            'cost_incl_tax',
+            'excl_tax',
+            'incl_tax',
+        ] as $key) {
+            $money = self::moneyValue($value[$key] ?? null);
+
+            if ($money !== null) {
+                return $money;
+            }
+        }
+
+        return null;
+    }
+
+    private function podPackageId(): string
+    {
+        $configured = (string) config('services.lulu.pod_package_id');
+        $normalized = preg_replace('/[^A-Za-z0-9]/', '', $configured) ?: $configured;
+
+        if ($configured !== $normalized) {
+            Log::channel('lulu')->info('Lulu: Normalized POD package ID for API payload.', [
+                'configured' => $configured,
+                'normalized' => $normalized,
+            ]);
+        }
+
+        return $normalized;
     }
 }
