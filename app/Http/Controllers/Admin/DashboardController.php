@@ -4,22 +4,22 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
-use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
     public function index()
     {
+        $counts = Order::selectRaw('fulfillment_status, COUNT(*) AS total')->groupBy('fulfillment_status')->pluck('total', 'fulfillment_status');
         $stats = [
-            'total'      => Order::count(),
-            'pending'    => Order::pending()->count(),
-            'submitted'  => Order::submitted()->count(),
-            'processing'  => Order::where('fulfillment_status', 'processing')->count(),
-            'in_production' => Order::where('fulfillment_status', 'in_production')->count(),
-            'shipped'    => Order::where('fulfillment_status', 'shipped')->count(),
-            'failed'     => Order::failed()->count(),
-            'today'      => Order::whereDate('created_at', today())->count(),
-            'this_week'  => Order::where('created_at', '>=', now()->startOfWeek())->count(),
+            'total' => $counts->sum(),
+            'pending' => ($counts['received'] ?? 0) + ($counts['processing'] ?? 0),
+            'submitted' => ($counts['submitted_to_lulu'] ?? 0) + ($counts['print_job_created'] ?? 0) + ($counts['in_production'] ?? 0),
+            'processing' => $counts['processing'] ?? 0,
+            'in_production' => $counts['in_production'] ?? 0,
+            'shipped' => $counts['shipped'] ?? 0,
+            'failed' => $counts['failed'] ?? 0,
+            'today' => Order::whereDate('created_at', today())->count(),
+            'this_week' => Order::where('created_at', '>=', now()->startOfWeek())->count(),
         ];
 
         $recentOrders = Order::latest()->take(10)->get();

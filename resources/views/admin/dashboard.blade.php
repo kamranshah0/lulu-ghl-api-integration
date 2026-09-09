@@ -171,10 +171,12 @@
             </p>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem;">
                 <a href="{{ route('admin.orders.show', $order) }}" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.625rem;">Inspect</a>
+                @if($order->canRetry())
                 <form action="{{ route('admin.orders.retry', $order) }}" method="POST">
                     @csrf
                     <button type="submit" class="btn btn-primary" style="width: 100%; font-size: 0.75rem; padding: 0.625rem;">Retry</button>
                 </form>
+                @endif
             </div>
         </div>
         @empty

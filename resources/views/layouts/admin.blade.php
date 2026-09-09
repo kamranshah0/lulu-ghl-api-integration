@@ -314,7 +314,7 @@
     <aside>
         <div class="sidebar-brand">
             <div class="logo-square">F</div>
-            <span class="brand-name">Forever Wellness</span>
+            <span class="brand-name">Forever Wellthy</span>
         </div>
         
         <div class="sidebar-content">

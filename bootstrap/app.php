@@ -14,7 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withSchedule(function (Schedule $schedule) {
-        $schedule->command('lulu:sync-status')->hourly();
+        $schedule->command('lulu:sync-status')->hourly()->withoutOverlapping(55);
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
@@ -26,4 +26,3 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
-

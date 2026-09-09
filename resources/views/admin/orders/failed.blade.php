@@ -59,10 +59,12 @@
                     <td style="color: var(--text-muted); font-size: 0.8125rem;">{{ $order->created_at->diffForHumans() }}</td>
                     <td style="text-align: right; padding-right: 1.5rem;">
                         <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                            @if($order->canRetry())
                             <form action="{{ route('admin.orders.retry', $order) }}" method="POST">
                                 @csrf
                                 <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Retry Job</button>
                             </form>
+                            @endif
                             <a href="{{ route('admin.orders.show', $order) }}" class="btn btn-outline" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Investigate</a>
                         </div>
                     </td>

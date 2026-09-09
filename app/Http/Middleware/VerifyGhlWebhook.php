@@ -21,7 +21,13 @@ class VerifyGhlWebhook
 
         // If no secret configured, skip validation (dev mode)
         if (empty($secret)) {
+            if (! app()->environment(['local', 'testing'])) {
+                Log::error('GHL webhook secret is missing. Requests are disabled.');
+
+                return response()->json(['error' => 'Webhook is not configured.'], 503);
+            }
             Log::warning('GHL Webhook: No secret configured. Skipping verification (dev mode).');
+
             return $next($request);
         }
 
@@ -31,9 +37,9 @@ class VerifyGhlWebhook
         // Method 2: Check query param (fallback)
         $querySecret = $request->query('secret');
 
-        if ($headerSecret !== $secret && $querySecret !== $secret) {
+        if ((! is_string($headerSecret) || ! hash_equals($secret, $headerSecret)) && (! is_string($querySecret) || ! hash_equals($secret, $querySecret))) {
             Log::warning('GHL Webhook: Invalid secret. Request rejected.', [
-                'ip'            => $request->ip(),
+                'ip' => $request->ip(),
                 'header_secret' => $headerSecret ? 'present_but_wrong' : 'missing',
             ]);
 

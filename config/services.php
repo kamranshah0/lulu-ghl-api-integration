@@ -41,17 +41,17 @@ return [
     |--------------------------------------------------------------------------
     */
     'lulu' => [
-        'client_key'      => env('LULU_CLIENT_KEY'),
-        'client_secret'   => env('LULU_CLIENT_SECRET'),
-        'use_sandbox'     => env('LULU_USE_SANDBOX', true),
-        'api_base'        => env('LULU_API_BASE', 'https://api.lulu.com'),
+        'client_key' => env('LULU_CLIENT_KEY'),
+        'client_secret' => env('LULU_CLIENT_SECRET'),
+        'use_sandbox' => env('LULU_USE_SANDBOX', true),
+        'api_base' => env('LULU_API_BASE', 'https://api.lulu.com'),
         'sandbox_api_base' => env('LULU_SANDBOX_API_BASE', 'https://api.sandbox.lulu.com'),
-        'contact_email'   => env('LULU_CONTACT_EMAIL'),
+        'contact_email' => env('LULU_CONTACT_EMAIL'),
         'book_interior_url' => env('LULU_BOOK_INTERIOR_URL'),
-        'book_cover_url'  => env('LULU_BOOK_COVER_URL'),
-        'pod_package_id'  => env('LULU_POD_PACKAGE_ID'),
-        'book_page_count' => env('LULU_BOOK_PAGE_COUNT', 200),
-        'shipping_level'  => env('LULU_SHIPPING_LEVEL', 'MAIL'),
+        'book_cover_url' => env('LULU_BOOK_COVER_URL'),
+        'pod_package_id' => env('LULU_POD_PACKAGE_ID'),
+        'book_page_count' => env('LULU_BOOK_PAGE_COUNT'),
+        'shipping_level' => env('LULU_SHIPPING_LEVEL', 'MAIL'),
     ],
 
     /*
@@ -61,10 +61,11 @@ return [
     */
     'ghl' => [
         'webhook_secret' => env('GHL_WEBHOOK_SECRET'),
-        'api_key'        => env('GHL_API_KEY'),
-        'location_id'    => env('GHL_LOCATION_ID'),
+        'api_key' => env('GHL_API_KEY'),
+        'api_version' => env('GHL_API_VERSION', 'legacy'),
+        'location_id' => env('GHL_LOCATION_ID'),
         'custom_field_id_status' => env('GHL_CUSTOM_FIELD_ID_STATUS'),
-        'custom_field_id_job_id'  => env('GHL_CUSTOM_FIELD_ID_JOB_ID'),
+        'custom_field_id_job_id' => env('GHL_CUSTOM_FIELD_ID_JOB_ID'),
     ],
 
     /*
@@ -73,8 +74,8 @@ return [
     |--------------------------------------------------------------------------
     */
     'admin' => [
-        'email'    => env('ADMIN_EMAIL', 'flechepheno@yahoo.fr'),
-        'password' => env('ADMIN_PASSWORD', 'changeme123'),
+        'email' => env('ADMIN_EMAIL'),
+        'password' => env('ADMIN_PASSWORD'),
     ],
 
 ];

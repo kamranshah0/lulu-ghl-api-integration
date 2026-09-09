@@ -25,7 +25,7 @@
             {{ $order->shipping_country }}
         </p>
 
-        <p style="margin:0 0 16px;">You will receive another update when shipping information is available.</p>
+        <p style="margin:0 0 16px;">For questions about your order, please reply to this email.</p>
 
         <p style="margin:0;">Thank you,<br>Forever Wellthy</p>
     </div>

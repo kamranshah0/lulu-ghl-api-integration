@@ -9,8 +9,8 @@ Status: {{ $order->lulu_status ?? 'Unknown' }}
 Quantity: {{ $order->quantity }}
 
 Cost Estimate:
-Print: ${{ number_format((float) $order->print_cost_estimate, 2) }}
-Shipping: ${{ number_format((float) $order->shipping_cost_estimate, 2) }}
+Print: {{ $order->print_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->print_cost_estimate, 2) }}
+Shipping: {{ $order->shipping_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->shipping_cost_estimate, 2) }}
 
 Customer:
 Name: {{ $order->buyer_name }}

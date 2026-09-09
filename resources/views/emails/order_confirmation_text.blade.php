@@ -6,7 +6,7 @@ Hi {{ $order->buyer_name }},
 
 Thank you for your order. We have received your Forever Wellthy book order and it is being prepared for fulfillment.
 
-You will receive another update when shipping information is available.
+For questions about your order, please reply to this email.
 
 Order ID: #{{ $order->id }}
 Quantity: {{ $order->quantity }}

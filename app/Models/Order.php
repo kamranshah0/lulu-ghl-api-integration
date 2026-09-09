@@ -17,6 +17,9 @@ class Order extends Model
         'fulfillment_status',
         'lulu_job_id',
         'lulu_status',
+        'lulu_environment',
+        'submission_started_at',
+        'ghl_synced_status',
         'book_sku',
         'quantity',
         'buyer_name',
@@ -37,9 +40,10 @@ class Order extends Model
     ];
 
     protected $casts = [
-        'raw_payload'            => 'array',
-        'amount_charged'         => 'decimal:2',
-        'print_cost_estimate'    => 'decimal:2',
+        'raw_payload' => 'array',
+        'submission_started_at' => 'datetime',
+        'amount_charged' => 'decimal:2',
+        'print_cost_estimate' => 'decimal:2',
         'shipping_cost_estimate' => 'decimal:2',
     ];
 
@@ -52,6 +56,24 @@ class Order extends Model
     public function events(): HasMany
     {
         return $this->hasMany(OrderEvent::class)->orderBy('created_at', 'asc');
+    }
+
+    public function canRetry(): bool
+    {
+        $environment = config('services.lulu.use_sandbox', true) ? 'sandbox' : 'production';
+
+        return $this->fulfillment_status === 'failed' && ! $this->lulu_job_id && ! $this->submission_started_at && $this->lulu_environment === $environment;
+    }
+
+    public static function fulfillmentStatusFor(string $status): string
+    {
+        return match ($status) {
+            'SHIPPED' => 'shipped',
+            'REJECTED', 'ERROR' => 'failed',
+            'CANCELED', 'CANCELLED' => 'cancelled',
+            'IN_PRODUCTION' => 'in_production',
+            default => 'print_job_created',
+        };
     }
 
     /*
@@ -70,10 +92,10 @@ class Order extends Model
         ?string $message = null
     ): OrderEvent {
         return $this->events()->create([
-            'source'     => $source,
+            'source' => $source,
             'event_type' => $eventType,
-            'payload'    => $payload,
-            'message'    => $message,
+            'payload' => $payload,
+            'message' => $message,
         ]);
     }
 
@@ -92,12 +114,12 @@ class Order extends Model
     public function getShippingAddressArray(): array
     {
         return [
-            'name'         => $this->buyer_name,
-            'street1'      => $this->shipping_address1,
-            'street2'      => $this->shipping_address2 ?? '',
-            'city'         => $this->shipping_city,
-            'state_code'   => $this->shipping_state,
-            'postcode'     => $this->shipping_zip,
+            'name' => $this->buyer_name,
+            'street1' => $this->shipping_address1,
+            'street2' => $this->shipping_address2 ?? '',
+            'city' => $this->shipping_city,
+            'state_code' => $this->shipping_state,
+            'postcode' => $this->shipping_zip,
             'country_code' => $this->shipping_country ?? 'US',
             'phone_number' => $this->buyer_phone ?? '',
         ];

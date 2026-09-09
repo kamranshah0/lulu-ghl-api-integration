@@ -25,8 +25,8 @@ Route::post('/webhooks/ghl', [WebhookController::class, 'handleGhlOrder'])
 // Health check endpoint (no auth — for uptime monitoring)
 Route::get('/health', function () {
     return response()->json([
-        'status'    => 'ok',
-        'service'   => 'Forever Wellthy Middleware',
+        'status' => 'ok',
+        'service' => 'Forever Wellthy',
         'timestamp' => now()->toIso8601String(),
     ]);
 })->name('health');

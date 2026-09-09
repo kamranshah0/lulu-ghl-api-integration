@@ -19,8 +19,7 @@ class OrderData
         public ?float $amountCharged,
         public ?string $contactId,
         public array $rawPayload
-    ) {
-    }
+    ) {}
 
     /**
      * Factory method to create DTO from GHL webhook payload.
@@ -29,9 +28,12 @@ class OrderData
     {
         // GHL often wraps everything in a 'payload' key
         $payload = $data['payload'] ?? $data;
+        if (! is_array($payload)) {
+            throw new \InvalidArgumentException('Payload must be an object.');
+        }
 
-        $order    = $payload['order']    ?? $payload;
-        $customer = $order['customer']   ?? $payload;
+        $order = $payload['order'] ?? $payload;
+        $customer = $order['customer'] ?? $payload;
         $shipping = $order['shippingAddress']
             ?? $order['shipping_address']
             ?? $order['shipping']
@@ -39,22 +41,45 @@ class OrderData
             ?? $payload['shipping_address']
             ?? $payload['shipping']
             ?? $payload;
-        $items    = $order['items']      ?? $order['line_items'] ?? [];
+        $items = $order['items'] ?? $order['line_items'] ?? [];
+        foreach ([$order, $customer, $shipping, $items] as $part) {
+            if (! is_array($part)) {
+                throw new \InvalidArgumentException('Order, customer, shipping and items must contain structured data.');
+            }
+        }
+        $payment = strtolower(self::firstFilled($order, $payload, ['payment_status', 'paymentStatus']) ?? 'paid');
+        if (in_array($payment, ['unpaid', 'pending', 'refunded', 'failed', 'cancelled', 'canceled'], true)) {
+            throw new \InvalidArgumentException('Order is not paid and cannot be sent for printing.');
+        }
 
         // GHL Order ID (check all possible locations)
-        $ghlOrderId = $order['id'] 
-            ?? $order['order_id']
-            ?? $payload['orderId'] 
+        $ghlOrderId = $order['order_id']
+            ?? $payload['orderId']
             ?? $payload['order_id']
-            ?? $payload['id'] 
+            ?? $order['id']
+            ?? $payload['id']
             ?? ($items[0]['meta']['order_id'] ?? null);
-        
-        if (!$ghlOrderId) {
+
+        if (! is_scalar($ghlOrderId) || trim((string) $ghlOrderId) === '' || strlen((string) $ghlOrderId) > 255) {
             throw new \InvalidArgumentException('Order ID is missing from payload.');
         }
 
         // Calculate total quantity
-        $quantity = collect($items)->sum(fn ($item) => (int) ($item['quantity'] ?? $item['qty'] ?? 0)) ?: 1;
+        $quantity = 0;
+        foreach ($items ?: [['quantity' => $order['quantity'] ?? $order['qty'] ?? 1]] as $item) {
+            $qty = is_array($item) ? ($item['quantity'] ?? $item['qty'] ?? 1) : null;
+            if (filter_var($qty, FILTER_VALIDATE_INT) === false || (int) $qty < 1) {
+                throw new \InvalidArgumentException('Each item quantity must be a positive integer.');
+            }
+            $quantity += (int) $qty;
+        }
+        if ($quantity > 10000) {
+            throw new \InvalidArgumentException('Order quantity exceeds the supported limit.');
+        }
+        $amount = self::firstFilled($order, $payload, ['totalAmount', 'total_amount', 'amount']);
+        if ($amount !== null && (! is_numeric($amount) || (float) $amount < 0 || (float) $amount > 99999999.99)) {
+            throw new \InvalidArgumentException('Order amount must be a non-negative numeric value.');
+        }
 
         // Normalize Country (Must be 2-char code)
         $country = self::normalizeCountry(self::firstFilled($shipping, $payload, [
@@ -79,7 +104,7 @@ class OrderData
         return new self(
             ghlOrderId: (string) $ghlOrderId,
             buyerName: self::buildBuyerName($customer, $payload),
-            buyerEmail: self::firstFilled($customer, $payload, ['email', 'buyer_email', 'customer_email']) ?? 'no-email@example.com',
+            buyerEmail: self::firstFilled($customer, $payload, ['email', 'buyer_email', 'customer_email']) ?? '',
             buyerPhone: self::firstFilled($customer, $payload, ['phone', 'phone_number', 'buyer_phone']),
             address1: self::firstFilled($shipping, $payload, ['address1', 'street1', 'line1', 'address', 'shipping_address1']) ?? '',
             address2: self::firstFilled($shipping, $payload, ['address2', 'street2', 'line2', 'shipping_address2']),
@@ -94,9 +119,9 @@ class OrderData
             ]) ?? '',
             country: $country,
             quantity: (int) $quantity,
-            amountCharged: isset($order['totalAmount']) ? (float) $order['totalAmount'] : (isset($payload['amount']) ? (float) $payload['amount'] : null),
-            contactId: $payload['contactId'] ?? $payload['contact_id'] ?? $customer['contactId'] ?? null,
-            rawPayload: $payload
+            amountCharged: $amount === null ? null : (float) $amount,
+            contactId: self::firstFilled($order, $payload, ['contactId', 'contact_id']) ?? self::firstFilled($customer, [], ['contactId', 'contact_id']),
+            rawPayload: $data
         );
     }
 
@@ -109,18 +134,18 @@ class OrderData
         }
 
         return trim(
-            (string) self::firstFilled($customer, $payload, ['firstName', 'first_name', 'first']) . ' ' .
+            (string) self::firstFilled($customer, $payload, ['firstName', 'first_name', 'first']).' '.
             (string) self::firstFilled($customer, $payload, ['lastName', 'last_name', 'last'])
-        ) ?: 'Unknown Customer';
+        );
     }
 
     private static function firstFilled(array $primary, array $fallback, array $keys): ?string
     {
         foreach ($keys as $key) {
-            $value = $primary[$key] ?? $fallback[$key] ?? null;
-
-            if ($value !== null && trim((string) $value) !== '') {
-                return trim((string) $value);
+            foreach ([$primary[$key] ?? null, $fallback[$key] ?? null] as $value) {
+                if (is_scalar($value) && trim((string) $value) !== '') {
+                    return trim((string) $value);
+                }
             }
         }
 
@@ -142,7 +167,7 @@ class OrderData
             'great britain' => 'GB',
         ];
 
-        return $countries[$value] ?? strtoupper(substr(trim($country), 0, 2));
+        return $countries[$value] ?? strtoupper(trim($country));
     }
 
     public static function normalizeState(?string $state, string $country = 'US'): string
@@ -162,6 +187,16 @@ class OrderData
 
         if (strtoupper($country) === 'US') {
             return self::usStateMap()[$key] ?? strtoupper($state);
+        }
+
+        if (strtoupper($country) === 'CA') {
+            return [
+                'alberta' => 'AB', 'british columbia' => 'BC', 'manitoba' => 'MB',
+                'new brunswick' => 'NB', 'newfoundland and labrador' => 'NL',
+                'nova scotia' => 'NS', 'northwest territories' => 'NT', 'nunavut' => 'NU',
+                'ontario' => 'ON', 'prince edward island' => 'PE', 'quebec' => 'QC',
+                'saskatchewan' => 'SK', 'yukon' => 'YT',
+            ][$key] ?? strtoupper($state);
         }
 
         return strtoupper($state);

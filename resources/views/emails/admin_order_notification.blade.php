@@ -19,8 +19,8 @@
         </p>
 
         <p style="margin:0 0 16px;">
-            Print cost estimate: ${{ number_format((float) $order->print_cost_estimate, 2) }}<br>
-            Shipping cost estimate: ${{ number_format((float) $order->shipping_cost_estimate, 2) }}
+            Print cost estimate: {{ $order->print_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->print_cost_estimate, 2) }}<br>
+            Shipping cost estimate: {{ $order->shipping_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->shipping_cost_estimate, 2) }}
         </p>
 
         <p style="margin:0 0 16px;">

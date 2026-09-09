@@ -5,7 +5,10 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessLuluPrintJob;
 use App\Models\Order;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
@@ -14,11 +17,24 @@ class OrderController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Order::query()->latest();
         $statuses = $this->statuses();
+        $orders = $this->filteredOrders($request)->latest()->paginate(25)->withQueryString();
+
+        return view('admin.orders.index', compact('orders', 'statuses'));
+    }
+
+    private function filteredOrders(Request $request): Builder
+    {
+        $request->validate([
+            'status' => ['nullable', Rule::in(array_keys($this->statuses()))],
+            'search' => ['nullable', 'string', 'max:255'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+        $query = Order::query();
 
         // Filter by status
-        if (($status = $request->get('status')) && array_key_exists($status, $statuses)) {
+        if ($status = $request->get('status')) {
             $query->where('fulfillment_status', $status);
         }
 
@@ -26,12 +42,12 @@ class OrderController extends Controller
         if ($search = $request->get('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('buyer_email', 'like', "%{$search}%")
-                  ->orWhere('buyer_name', 'like', "%{$search}%")
-                  ->orWhere('ghl_order_id', 'like', "%{$search}%")
-                  ->orWhere('lulu_job_id', 'like', "%{$search}%")
-                  ->orWhere('shipping_city', 'like', "%{$search}%")
-                  ->orWhere('shipping_state', 'like', "%{$search}%")
-                  ->orWhere('shipping_zip', 'like', "%{$search}%");
+                    ->orWhere('buyer_name', 'like', "%{$search}%")
+                    ->orWhere('ghl_order_id', 'like', "%{$search}%")
+                    ->orWhere('lulu_job_id', 'like', "%{$search}%")
+                    ->orWhere('shipping_city', 'like', "%{$search}%")
+                    ->orWhere('shipping_state', 'like', "%{$search}%")
+                    ->orWhere('shipping_zip', 'like', "%{$search}%");
             });
         }
 
@@ -43,9 +59,7 @@ class OrderController extends Controller
             $query->whereDate('created_at', '<=', $to);
         }
 
-        $orders = $query->paginate(25)->withQueryString();
-
-        return view('admin.orders.index', compact('orders', 'statuses'));
+        return $query;
     }
 
     /**
@@ -54,6 +68,7 @@ class OrderController extends Controller
     public function show(Order $order)
     {
         $order->load('events');
+
         return view('admin.orders.show', compact('order'));
     }
 
@@ -62,20 +77,27 @@ class OrderController extends Controller
      */
     public function retry(Order $order)
     {
-        if ($order->fulfillment_status !== 'failed') {
-            return back()->with('error', 'Only failed orders can be retried.');
+        $queued = DB::transaction(function () use ($order) {
+            $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            if (! $order->canRetry()) {
+                return false;
+            }
+            $order->update([
+                'fulfillment_status' => 'received',
+                'error_message' => null,
+                'retry_count' => 0,
+            ]);
+
+            $order->logEvent('admin_manual_retry', 'admin', [], 'Admin triggered manual retry.');
+
+            ProcessLuluPrintJob::dispatch($order);
+
+            return true;
+        });
+
+        if (! $queued) {
+            return back()->with('error', 'Retry blocked: the order is not failed, already has a Lulu job, or needs submission reconciliation.');
         }
-
-        // Reset for retry
-        $order->update([
-            'fulfillment_status' => 'received',
-            'error_message'      => null,
-            'retry_count'        => 0,
-        ]);
-
-        $order->logEvent('admin_manual_retry', 'admin', [], 'Admin triggered manual retry.');
-
-        ProcessLuluPrintJob::dispatch($order);
 
         return back()->with('success', "Order #{$order->id} has been queued for retry.");
     }
@@ -86,6 +108,7 @@ class OrderController extends Controller
     public function failed()
     {
         $orders = Order::failed()->latest()->paginate(25);
+
         return view('admin.orders.failed', compact('orders'));
     }
 
@@ -94,53 +117,49 @@ class OrderController extends Controller
      */
     public function export(Request $request)
     {
-        $orders = Order::query()
-            ->when($request->get('status'), fn($q, $s) => $q->where('fulfillment_status', $s))
-            ->get();
+        $query = $this->filteredOrders($request);
 
-        $handle = fopen('php://temp', 'r+');
-        fputcsv($handle, [
-            'ID',
-            'GHL Order ID',
-            'Buyer Name',
-            'Email',
-            'Status',
-            'Lulu Status',
-            'Lulu Job ID',
-            'Shipping City',
-            'Shipping State',
-            'Shipping Zip',
-            'Amount',
-            'Error',
-            'Created At',
-        ]);
-
-        foreach ($orders as $o) {
+        return response()->streamDownload(function () use ($query) {
+            $handle = fopen('php://output', 'w');
             fputcsv($handle, [
-                $o->id,
-                $o->ghl_order_id,
-                $o->buyer_name,
-                $o->buyer_email,
-                $o->fulfillment_status,
-                $o->lulu_status ?? '',
-                $o->lulu_job_id ?? '',
-                $o->shipping_city,
-                $o->shipping_state,
-                $o->shipping_zip,
-                $o->amount_charged,
-                $o->error_message,
-                $o->created_at->format('Y-m-d H:i:s'),
-            ]);
-        }
+                'ID',
+                'GHL Order ID',
+                'Buyer Name',
+                'Email',
+                'Status',
+                'Lulu Status',
+                'Lulu Job ID',
+                'Shipping City',
+                'Shipping State',
+                'Shipping Zip',
+                'Amount',
+                'Error',
+                'Created At',
+            ], ',', '"', '');
 
-        rewind($handle);
-        $csv = stream_get_contents($handle);
-        fclose($handle);
+            foreach ($query->lazyById(100) as $o) {
+                $row = [
+                    $o->id,
+                    $o->ghl_order_id,
+                    $o->buyer_name,
+                    $o->buyer_email,
+                    $o->fulfillment_status,
+                    $o->lulu_status ?? '',
+                    $o->lulu_job_id ?? '',
+                    $o->shipping_city,
+                    $o->shipping_state,
+                    $o->shipping_zip,
+                    $o->amount_charged,
+                    $o->error_message,
+                    $o->created_at->format('Y-m-d H:i:s'),
+                ];
+                // Spreadsheet applications execute formulas even when CSV values are quoted.
+                $row = array_map(fn ($value) => is_string($value) && preg_match('/^[\s]*[=+@-]/', $value) ? "'".$value : $value, $row);
+                fputcsv($handle, $row, ',', '"', '');
+            }
 
-        return response($csv, 200, [
-            'Content-Type'        => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="orders_' . now()->format('Ymd_His') . '.csv"',
-        ]);
+            fclose($handle);
+        }, 'orders_'.now()->format('Ymd_His').'.csv', ['Content-Type' => 'text/csv']);
     }
 
     private function statuses(): array

@@ -73,4 +73,28 @@ class OrderDataTest extends TestCase
     {
         $this->assertSame('MO', OrderData::normalizeState('Missroii', 'US'));
     }
+
+    public function test_blank_nested_value_falls_back_and_preserves_future_fields(): void
+    {
+        $data = ['payload' => ['order_id' => 'ORDER-1', 'email' => 'buyer@example.com', 'quantity' => 2,
+            'order' => ['customer' => ['email' => ''], 'quantity' => 2], 'personalization' => ['name' => 'Future Name']]];
+        $order = OrderData::fromGhlPayload($data);
+        $this->assertSame('buyer@example.com', $order->buyerEmail);
+        $this->assertSame(2, $order->quantity);
+        $this->assertSame($data, $order->rawPayload);
+    }
+
+    public function test_invalid_quantity_is_not_silently_changed_to_one(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        OrderData::fromGhlPayload(['order_id' => 'ORDER-1', 'items' => [['quantity' => 0]]]);
+    }
+
+    public function test_unknown_country_is_not_truncated_into_another_country(): void
+    {
+        $order = OrderData::fromGhlPayload(['order_id' => 'ORDER-1', 'country' => 'Australia']);
+        $this->assertSame('AUSTRALIA', $order->country);
+        $this->assertSame('ON', OrderData::normalizeState('Ontario', 'CA'));
+        $this->assertSame('MI', OrderData::normalizeState('MI', 'US'));
+    }
 }

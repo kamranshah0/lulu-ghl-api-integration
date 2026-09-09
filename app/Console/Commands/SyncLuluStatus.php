@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\SendOrderEmails;
 use App\Models\Order;
 use App\Services\GhlApiService;
 use App\Services\LuluApiService;
@@ -42,18 +43,34 @@ class SyncLuluStatus extends Command
         $this->info('🔄 Starting Lulu status synchronization...');
 
         // Query orders that are submitted but not finalized (Shipped/Rejected)
-        $orders = Order::whereIn('fulfillment_status', [
-            'submitted_to_lulu',
-            'print_job_created',
-            'in_production'
-        ])->whereNotNull('lulu_job_id')->get();
+        $environment = config('services.lulu.use_sandbox', true) ? 'sandbox' : 'production';
+        $unknown = Order::whereNull('lulu_environment')->whereNotNull('lulu_job_id')->count();
+        if ($unknown) {
+            $this->warn("{$unknown} historical jobs have an unverified environment. Use lulu:reconcile after checking their portal.");
+        }
+        $orders = Order::where('lulu_environment', $environment)->where(function ($query) {
+            $query->whereIn('fulfillment_status', [
+                'submitted_to_lulu',
+                'print_job_created',
+                'in_production',
+            ])->orWhere(function ($pending) {
+                $pending->whereNotNull('ghl_contact_id')->where(function ($status) {
+                    $status->whereNull('ghl_synced_status')->orWhereColumn('ghl_synced_status', '!=', 'lulu_status');
+                });
+            })->orWhere(function ($email) {
+                $email->whereNotIn('fulfillment_status', ['failed', 'cancelled'])->where(function ($missing) {
+                    $missing->whereDoesntHave('events', fn ($q) => $q->where('event_type', 'confirmation_email_sent'))
+                        ->orWhereDoesntHave('events', fn ($q) => $q->where('event_type', 'admin_notification_email_sent'));
+                });
+            });
+        })->whereNotNull('lulu_job_id')->lazyById(100);
+        $failures = 0;
 
         if ($orders->isEmpty()) {
             $this->info('✅ No active orders to sync.');
+
             return 0;
         }
-
-        $this->info("📦 Found {$orders->count()} orders to check.");
 
         foreach ($orders as $order) {
             try {
@@ -62,10 +79,20 @@ class SyncLuluStatus extends Command
                 $statusData = $this->luluApi->getPrintJobStatus($order->lulu_job_id);
                 $newStatus = $statusData['status']['name'] ?? 'UNKNOWN';
 
-                if ($newStatus !== $order->lulu_status) {
+                if ($newStatus !== $order->lulu_status || $order->fulfillment_status !== Order::fulfillmentStatusFor($newStatus)) {
                     $this->updateOrderStatus($order, $newStatus, $statusData);
                 }
+                if ($order->ghl_contact_id && $order->ghl_synced_status !== $newStatus) {
+                    if (! $this->syncGhl($order, $newStatus)) {
+                        $failures++;
+                    }
+                }
+                if (! in_array($order->fulfillment_status, ['failed', 'cancelled']) &&
+                    $order->events()->whereIn('event_type', ['confirmation_email_sent', 'admin_notification_email_sent'])->distinct()->count('event_type') < 2) {
+                    SendOrderEmails::dispatch($order);
+                }
             } catch (\Exception $e) {
+                $failures++;
                 $this->error("❌ Failed to sync order #{$order->id}: {$e->getMessage()}");
                 Log::warning("SyncLuluStatus: Failed to sync order #{$order->id}", [
                     'lulu_job_id' => $order->lulu_job_id,
@@ -79,7 +106,8 @@ class SyncLuluStatus extends Command
         }
 
         $this->info('🏁 Sync complete.');
-        return 0;
+
+        return $failures > 0 ? 1 : 0;
     }
 
     protected function syncMissingCostEstimate(Order $order): void
@@ -97,8 +125,8 @@ class SyncLuluStatus extends Command
 
             if ($costs['print_cost'] !== null || $costs['shipping_cost'] !== null) {
                 $order->update([
-                    'print_cost_estimate' => $costs['print_cost'],
-                    'shipping_cost_estimate' => $costs['shipping_cost'],
+                    'print_cost_estimate' => $order->print_cost_estimate ?? $costs['print_cost'],
+                    'shipping_cost_estimate' => $order->shipping_cost_estimate ?? $costs['shipping_cost'],
                 ]);
                 $order->logEvent('lulu_cost_calculated', 'lulu', [
                     'parsed_costs' => $costs,
@@ -124,24 +152,9 @@ class SyncLuluStatus extends Command
 
         $oldStatus = $order->lulu_status;
         $order->lulu_status = $luluStatus;
+        $order->fulfillment_status = Order::fulfillmentStatusFor($luluStatus);
 
-        // Map Lulu status to our internal fulfillment_status
-        // Possible Lulu statuses: CREATED, REJECTED, IN_PRODUCTION, SHIPPED, CANCELED
-        switch ($luluStatus) {
-            case 'SHIPPED':
-                $order->fulfillment_status = 'shipped';
-                break;
-            case 'REJECTED':
-                $order->fulfillment_status = 'failed';
-                $order->error_message = $this->extractErrorMessage($fullData);
-                break;
-            case 'IN_PRODUCTION':
-                $order->fulfillment_status = 'in_production';
-                break;
-            case 'CANCELED':
-                $order->fulfillment_status = 'cancelled';
-                break;
-        }
+        $order->error_message = in_array($luluStatus, ['REJECTED', 'ERROR']) ? $this->extractErrorMessage($fullData) : null;
 
         $order->save();
 
@@ -149,17 +162,25 @@ class SyncLuluStatus extends Command
         $order->logEvent('status_synced', 'lulu', [
             'old_lulu_status' => $oldStatus,
             'new_lulu_status' => $luluStatus,
-            'full_response'   => $fullData
+            'full_response' => $fullData,
         ], "Status synced from Lulu: {$luluStatus}");
 
-        // Sync to GHL
+    }
+
+    protected function syncGhl(Order $order, string $luluStatus): bool
+    {
         if ($order->ghl_contact_id) {
             try {
-                $this->ghlApi->updateContactFulfillmentStatus(
+                $synced = $this->ghlApi->updateContactFulfillmentStatus(
                     $order->ghl_contact_id,
                     $order->lulu_job_id,
                     $luluStatus
                 );
+                if (! $synced) {
+                    throw new \RuntimeException('GHL status update was not accepted or custom fields are not configured.');
+                }
+                $order->update(['ghl_synced_status' => $luluStatus]);
+                $order->logEvent('ghl_status_synced', 'ghl', ['status' => $luluStatus], 'GHL fulfillment status updated.');
             } catch (\Throwable $e) {
                 Log::warning("SyncLuluStatus: Failed to sync GHL for order #{$order->id}", [
                     'error' => $e->getMessage(),
@@ -168,8 +189,12 @@ class SyncLuluStatus extends Command
                     'error' => $e->getMessage(),
                     'lulu_status' => $luluStatus,
                 ], 'Lulu status changed locally, but GHL update failed.');
+
+                return false;
             }
         }
+
+        return true;
     }
 
     /**
@@ -179,14 +204,18 @@ class SyncLuluStatus extends Command
     {
         $rejection = $data['status']['rejection_reason'] ?? null;
         if ($rejection) {
-            return $rejection;
+            return is_string($rejection) ? $rejection : json_encode($rejection);
         }
 
         // Check line items for errors
         foreach ($data['line_items'] ?? [] as $item) {
-            if (!empty($item['printable_normalization']['errors'])) {
+            if (! empty($item['printable_normalization']['errors'])) {
                 return json_encode($item['printable_normalization']['errors']);
             }
+        }
+
+        if (! empty($data['status']['message'])) {
+            return is_string($data['status']['message']) ? $data['status']['message'] : json_encode($data['status']['message']);
         }
 
         return 'Order rejected by Lulu (Check dashboard for details)';

@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
@@ -15,17 +16,14 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        // User::factory()->create([
-        //     'name' => 'Admin User',
-        //     'email' => 'admin@foreverwellthy.com',
-        //     'password' => \Illuminate\Support\Facades\Hash::make('changeme123'),
-        // ]);
-        User::factory()->create([
+        $email = config('services.admin.email');
+        $password = config('services.admin.password');
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL) || ! is_string($password) || strlen($password) < 12) {
+            throw new \RuntimeException('Set ADMIN_EMAIL and a strong ADMIN_PASSWORD (at least 12 characters) before seeding an admin.');
+        }
+        User::firstOrCreate(['email' => $email], [
             'name' => 'Admin User',
-            'email' => 'admin@admin.com',
-            'password' => \Illuminate\Support\Facades\Hash::make('admin@admin.com'),
+            'password' => Hash::make($password),
         ]);
     }
 }

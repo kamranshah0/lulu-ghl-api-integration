@@ -2,27 +2,36 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class GhlApiService
 {
     private string $apiKey;
+
     private string $locationId;
+
     private string $baseUrl = 'https://rest.gohighlevel.com/v1';
+
+    private string $version;
 
     public function __construct()
     {
-        $this->apiKey     = config('services.ghl.api_key');
-        $this->locationId = config('services.ghl.location_id');
+        $this->apiKey = (string) config('services.ghl.api_key');
+        $this->locationId = (string) config('services.ghl.location_id');
+        $this->version = (string) config('services.ghl.api_version', 'legacy');
+        if ($this->version !== 'legacy') {
+            $this->baseUrl = 'https://services.leadconnectorhq.com';
+        }
     }
 
     /**
      * Update a GHL contact's custom field to reflect Lulu order status.
      *
-     * @param  string $contactId   GHL Contact ID
-     * @param  string $fieldId     GHL Custom Field ID (e.g. 3sv6UEo51C9B...)
-     * @param  mixed  $value       The value to set
+     * @param  string  $contactId  GHL Contact ID
+     * @param  string  $fieldId  GHL Custom Field ID (e.g. 3sv6UEo51C9B...)
+     * @param  mixed  $value  The value to set
      */
     public function updateContactCustomField(string $contactId, string $fieldId, $value): bool
     {
@@ -30,24 +39,22 @@ class GhlApiService
             return false;
         }
 
-        $response = Http::withHeaders([
-            'Authorization' => "Bearer {$this->apiKey}",
-            'Content-Type'  => 'application/json',
-        ])->put("{$this->baseUrl}/contacts/{$contactId}", [
+        $body = $this->version === 'legacy' ? [
             'customField' => [
                 $fieldId => $value,
             ],
-        ]);
+        ] : ['customFields' => [['id' => $fieldId, 'fieldValue' => $value]]];
+        $response = $this->request()->put("{$this->baseUrl}/contacts/".rawurlencode($contactId), $body);
 
         if (! $response->successful()) {
             Log::warning('GHL: Failed to update custom field.', [
                 'contact_id' => $contactId,
-                'field_id'   => $fieldId,
-                'response'   => $response->json(),
+                'field_id' => $fieldId,
+                'response' => $response->json(),
             ]);
         }
 
-        return $response->successful();
+        return $response->successful() && $response->json('succeeded') !== false && $response->json('success') !== false;
     }
 
     /**
@@ -59,17 +66,17 @@ class GhlApiService
         string $status
     ): bool {
         $statusFieldId = config('services.ghl.custom_field_id_status');
-        $jobIdFieldId  = config('services.ghl.custom_field_id_job_id');
+        $jobIdFieldId = config('services.ghl.custom_field_id_job_id');
 
+        $results = [];
         if ($statusFieldId) {
-            $this->updateContactCustomField($contactId, $statusFieldId, $status);
+            $results[] = $this->updateContactCustomField($contactId, $statusFieldId, $status);
         }
-
         if ($jobIdFieldId) {
-            $this->updateContactCustomField($contactId, $jobIdFieldId, $luluJobId);
+            $results[] = $this->updateContactCustomField($contactId, $jobIdFieldId, $luluJobId);
         }
 
-        return true;
+        return count($results) > 0 && ! in_array(false, $results, true);
     }
 
     /**
@@ -81,13 +88,20 @@ class GhlApiService
             return false;
         }
 
-        $response = Http::withHeaders([
-            'Authorization' => "Bearer {$this->apiKey}",
-            'Content-Type'  => 'application/json',
-        ])->post("{$this->baseUrl}/contacts/{$contactId}/notes", [
+        $response = $this->request()->post("{$this->baseUrl}/contacts/".rawurlencode($contactId).'/notes', [
             'body' => $noteBody,
         ]);
 
-        return $response->successful();
+        return $response->successful() && $response->json('success') !== false;
+    }
+
+    private function request(): PendingRequest
+    {
+        $request = Http::connectTimeout(5)->timeout(10)->acceptJson()->withToken($this->apiKey);
+        if ($this->version !== 'legacy') {
+            $request->withHeaders(['Version' => $this->version]);
+        }
+
+        return $request;
     }
 }

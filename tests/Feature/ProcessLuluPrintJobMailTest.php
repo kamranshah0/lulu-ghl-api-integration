@@ -24,6 +24,7 @@ class ProcessLuluPrintJobMailTest extends TestCase
 
         $order = Order::create([
             'ghl_order_id' => 'GHL-EMAIL-1001',
+            'lulu_environment' => 'sandbox',
             'payment_status' => 'paid',
             'fulfillment_status' => 'received',
             'book_sku' => '0600X0900.BW.STD.PB.060UC444.GXX',
@@ -40,6 +41,8 @@ class ProcessLuluPrintJobMailTest extends TestCase
         ]);
 
         $luluApi = Mockery::mock(LuluApiService::class);
+        $luluApi->shouldReceive('getAccessToken')->once()->andReturn('test-token');
+        $luluApi->shouldReceive('validatePrintConfiguration')->once();
         $luluApi->shouldReceive('calculateCost')->once()->andReturn([
             'line_item_costs' => [
                 [

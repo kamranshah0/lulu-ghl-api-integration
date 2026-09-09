@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\LuluApiException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -10,16 +11,19 @@ use Illuminate\Support\Facades\Log;
 class LuluApiService
 {
     private string $baseUrl;
+
     private string $clientKey;
+
     private string $clientSecret;
+
     private bool $useSandbox;
 
     public function __construct()
     {
-        $this->useSandbox   = config('services.lulu.use_sandbox', true);
-        $this->clientKey    = config('services.lulu.client_key');
-        $this->clientSecret = config('services.lulu.client_secret');
-        $this->baseUrl      = $this->useSandbox
+        $this->useSandbox = config('services.lulu.use_sandbox', true);
+        $this->clientKey = trim((string) config('services.lulu.client_key'));
+        $this->clientSecret = trim((string) config('services.lulu.client_secret'));
+        $this->baseUrl = $this->useSandbox
             ? config('services.lulu.sandbox_api_base', 'https://api.sandbox.lulu.com')
             : config('services.lulu.api_base', 'https://api.lulu.com');
     }
@@ -30,32 +34,74 @@ class LuluApiService
     |--------------------------------------------------------------------------
     */
 
+    public function environment(): string
+    {
+        return $this->useSandbox ? 'sandbox' : 'production';
+    }
+
+    public function clearAccessToken(): void
+    {
+        Cache::forget($this->tokenCacheKey());
+    }
+
+    private function tokenCacheKey(): string
+    {
+        return 'lulu_token_'.$this->environment().'_'.hash('sha256', $this->baseUrl.'|'.$this->clientKey.'|'.$this->clientSecret);
+    }
+
     public function getAccessToken(): string
     {
-        $cacheKey = 'lulu_access_token_' . ($this->useSandbox ? 'sandbox' : 'production');
+        $tokenUrl = rtrim($this->baseUrl, '/').'/auth/realms/glasstree/protocol/openid-connect/token';
+        if ($this->clientKey === '' || $this->clientSecret === '') {
+            throw new LuluApiException('Lulu '.$this->environment().' credentials are missing. Configure LULU_CLIENT_KEY and LULU_CLIENT_SECRET.', 0, $tokenUrl);
+        }
+        if ($token = Cache::get($this->tokenCacheKey())) {
+            return $token;
+        }
 
-        return Cache::remember($cacheKey, now()->addMinutes(50), function () {
-            $tokenUrl = $this->useSandbox
-                ? 'https://api.sandbox.lulu.com/auth/realms/glasstree/protocol/openid-connect/token'
-                : 'https://api.lulu.com/auth/realms/glasstree/protocol/openid-connect/token';
+        $response = Http::connectTimeout(10)->timeout(30)->acceptJson()->asForm()
+            ->withBasicAuth($this->clientKey, $this->clientSecret)
+            ->post($tokenUrl, ['grant_type' => 'client_credentials']);
 
-            $response = Http::withoutVerifying()->asForm()->post($tokenUrl, [
-                'client_id'     => $this->clientKey,
-                'client_secret' => $this->clientSecret,
-                'grant_type'    => 'client_credentials',
+        if (! $response->successful()) {
+            // Keep only OAuth error fields; never persist credentials or tokens from a response.
+            $body = json_encode([
+                'error' => $this->redact((string) $response->json('error', 'authentication_failed')),
+                'error_description' => $this->redact((string) $response->json('error_description', 'No OAuth error description returned.')),
             ]);
+            throw new LuluApiException(
+                'Lulu '.$this->environment().' authentication failed (HTTP '.$response->status().'). Verify credentials from the matching Lulu developer portal and restart workers after configuration changes.',
+                $response->status(), $tokenUrl, responseBody: $body
+            );
+        }
+        $token = $response->json('access_token');
+        if (! is_string($token) || $token === '') {
+            throw new LuluApiException('Lulu token response did not contain an access token.', $response->status(), $tokenUrl);
+        }
+        $ttl = max(1, (int) $response->json('expires_in', 3600) - 60);
+        Cache::put($this->tokenCacheKey(), $token, $ttl);
 
-            if (! $response->successful()) {
-                Log::channel('lulu')->error('Lulu: Auth token retrieval failed.', [
-                    'status' => $response->status(),
-                    'body'   => $response->body()
-                ]);
-                throw new LuluApiException('Lulu authentication failed', $response->status(), $tokenUrl);
-            }
+        return $token;
+    }
 
-            Log::channel('lulu')->info('Lulu: Access token refreshed.');
-            return $response->json()['access_token'];
-        });
+    private function redact(string $message): string
+    {
+        return str_replace(array_filter([$this->clientKey, $this->clientSecret, base64_encode($this->clientKey.':'.$this->clientSecret)]), '[redacted]', $message);
+    }
+
+    private function request(string $method, string $path, array $data = []): Response
+    {
+        $url = rtrim($this->baseUrl, '/').$path;
+        $send = fn () => Http::connectTimeout(10)->timeout(30)->acceptJson()->withToken($this->getAccessToken())
+            ->send($method, $url, $method === 'GET' ? ['query' => $data] : ['json' => $data]);
+        $response = $send();
+        // An explicit 401 is safe to retry. Never automatically repeat an ambiguous POST.
+        if ($response->status() === 401) {
+            $this->clearAccessToken();
+            $response = $send();
+        }
+
+        return $response;
     }
 
     /*
@@ -66,31 +112,31 @@ class LuluApiService
 
     public function createPrintJob(array $shippingAddress, string $ghlOrderId, int $quantity = 1): array
     {
-        $token = $this->getAccessToken();
-
+        $this->validatePrintConfiguration();
         $payload = [
             'contact_email' => config('services.lulu.contact_email'),
-            'external_id'   => $ghlOrderId,
-            'line_items'    => [
+            'external_id' => $ghlOrderId,
+            'line_items' => [
                 [
-                    'title'          => 'Forever Wellthy Book',
-                    'cover'          => config('services.lulu.book_cover_url'),
-                    'interior'       => config('services.lulu.book_interior_url'),
-                    'pod_package_id' => $this->podPackageId(),
-                    'quantity'       => $quantity,
+                    'title' => 'Forever Wellthy Book',
+                    'printable_normalization' => [
+                        'cover' => ['source_url' => config('services.lulu.book_cover_url')],
+                        'interior' => ['source_url' => config('services.lulu.book_interior_url')],
+                        'pod_package_id' => $this->podPackageId(),
+                    ],
+                    'quantity' => $quantity,
                 ],
             ],
             'shipping_address' => $shippingAddress,
-            'shipping_level'   => config('services.lulu.shipping_level', 'MAIL'),
+            'shipping_level' => config('services.lulu.shipping_level', 'MAIL'),
         ];
 
         Log::channel('lulu')->info('Lulu: Submitting print job.', [
             'external_id' => $ghlOrderId,
-            'payload'     => $payload
+            'payload' => $payload,
         ]);
 
-        $response = Http::withoutVerifying()->withToken($token)
-            ->post("{$this->baseUrl}/print-jobs/", $payload);
+        $response = $this->request('POST', '/print-jobs/', $payload);
 
         if (! $response->successful()) {
             throw new LuluApiException(
@@ -104,7 +150,7 @@ class LuluApiService
 
         $data = $response->json();
         Log::channel('lulu')->info('Lulu: Print job created effectively.', [
-            'job_id' => $data['id'] ?? 'unknown'
+            'job_id' => $data['id'] ?? 'unknown',
         ]);
 
         return $data;
@@ -121,17 +167,14 @@ class LuluApiService
      */
     public function getPrintJobStatus(string $luluJobId): array
     {
-        $token = $this->getAccessToken();
-
-        $response = Http::withoutVerifying()->withToken($token)
-            ->get("{$this->baseUrl}/print-jobs/{$luluJobId}/");
+        $response = $this->request('GET', '/print-jobs/'.rawurlencode($luluJobId).'/');
 
         if (! $response->successful()) {
             Log::error('Lulu: Failed to fetch print job status.', [
                 'lulu_job_id' => $luluJobId,
-                'status'      => $response->status(),
+                'status' => $response->status(),
             ]);
-            throw new \RuntimeException('Failed to fetch Lulu job status: ' . $response->body());
+            throw new \RuntimeException('Failed to fetch Lulu job status: '.$response->body());
         }
 
         return $response->json();
@@ -149,29 +192,27 @@ class LuluApiService
      */
     public function calculateCost(array $shippingAddress, int $quantity = 1): array
     {
-        $token = $this->getAccessToken();
-
+        if ((int) config('services.lulu.book_page_count') < 1) {
+            throw new \InvalidArgumentException('LULU_BOOK_PAGE_COUNT must match the final interior PDF.');
+        }
         $payload = [
             'line_items' => [
                 [
                     'pod_package_id' => $this->podPackageId(),
-                    'quantity'       => $quantity,
-                    'cover'          => config('services.lulu.book_cover_url'),
-                    'interior'       => config('services.lulu.book_interior_url'),
-                    'page_count'     => (int) config('services.lulu.book_page_count', 60),
+                    'quantity' => $quantity,
+                    'page_count' => (int) config('services.lulu.book_page_count', 60),
                 ],
             ],
             'shipping_address' => $shippingAddress,
-            'shipping_level'   => config('services.lulu.shipping_level', 'MAIL'),
+            'shipping_option' => config('services.lulu.shipping_level', 'MAIL'),
         ];
 
-        $response = Http::withoutVerifying()->withToken($token)
-            ->post("{$this->baseUrl}/print-job-cost-calculations/", $payload);
+        $response = $this->request('POST', '/print-job-cost-calculations/', $payload);
 
         if (! $response->successful()) {
             Log::warning('Lulu: Cost calculation failed (non-blocking).', [
-                'status'   => $response->status(),
-                'payload'  => $payload,
+                'status' => $response->status(),
+                'payload' => $payload,
                 'response' => $response->json() ?? $response->body(),
             ]);
             throw new LuluApiException(
@@ -230,10 +271,11 @@ class LuluApiService
 
         if (is_string($value)) {
             $normalized = preg_replace('/[^0-9.\-]/', '', $value);
+
             return is_numeric($normalized) ? (float) $normalized : null;
         }
 
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return null;
         }
 
@@ -260,16 +302,19 @@ class LuluApiService
 
     private function podPackageId(): string
     {
-        $configured = (string) config('services.lulu.pod_package_id');
-        $normalized = preg_replace('/[^A-Za-z0-9]/', '', $configured) ?: $configured;
+        return trim((string) config('services.lulu.pod_package_id'));
+    }
 
-        if ($configured !== $normalized) {
-            Log::channel('lulu')->info('Lulu: Normalized POD package ID for API payload.', [
-                'configured' => $configured,
-                'normalized' => $normalized,
-            ]);
+    public function validatePrintConfiguration(): void
+    {
+        foreach (['book_cover_url', 'book_interior_url'] as $key) {
+            $url = (string) config('services.lulu.'.$key);
+            if (! filter_var($url, FILTER_VALIDATE_URL) || parse_url($url, PHP_URL_SCHEME) !== 'https') {
+                throw new \InvalidArgumentException('Lulu '.$key.' must be a downloadable HTTPS PDF URL.');
+            }
         }
-
-        return $normalized;
+        if ($this->podPackageId() === '' || ! filter_var(config('services.lulu.contact_email'), FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException('Lulu POD package ID and contact email must be configured.');
+        }
     }
 }

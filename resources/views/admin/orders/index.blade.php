@@ -96,7 +96,7 @@
                             <span style="color: var(--text-muted); font-size: 0.75rem;">Pending</span>
                         @endif
                     </td>
-                    <td style="font-weight: 700; color: var(--text-main);">${{ number_format($order->amount_charged, 2) }}</td>
+                    <td style="font-weight: 700; color: var(--text-main);">{{ $order->amount_charged === null ? 'Unavailable' : '$'.number_format((float) $order->amount_charged, 2) }}</td>
                     <td style="color: var(--text-muted); font-size: 0.8125rem;">{{ $order->created_at->format('M d, Y') }}</td>
                     <td style="text-align: right; padding-right: 1.5rem;">
                         <a href="{{ route('admin.orders.show', $order) }}" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">View Details</a>

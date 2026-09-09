@@ -15,7 +15,7 @@
         </div>
     </div>
     <div style="display: flex; gap: 1rem; align-items: center;">
-        @if($order->fulfillment_status == 'failed')
+        @if($order->canRetry())
         <form action="{{ route('admin.orders.retry', $order) }}" method="POST">
             @csrf
             <button type="submit" class="btn btn-primary" style="padding: 0.625rem 1.5rem;">Retry Fulfillment</button>
@@ -53,7 +53,7 @@
             </div>
             <div>
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Amount Paid</label>
-                <p style="font-weight: 800; color: var(--text-main); font-size: 1.125rem;">${{ number_format($order->amount_charged, 2) }}</p>
+                <p style="font-weight: 800; color: var(--text-main); font-size: 1.125rem;">{{ $order->amount_charged === null ? 'Unavailable' : '$'.number_format((float) $order->amount_charged, 2) }}</p>
             </div>
         </div>
 
@@ -90,6 +90,16 @@
             <div>
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">API Status</label>
                 <p style="font-weight: 700; color: var(--text-main);">{{ strtoupper($order->lulu_status ?? 'N/A') }}</p>
+                <p>{{ ucfirst($order->lulu_environment ?? 'Environment unverified') }}</p>
+                @if(!$order->lulu_environment)
+                    <p>Historical order: verify its Lulu environment before processing.</p>
+                @endif
+                @if($order->submission_started_at && !$order->lulu_job_id)
+                    <p>Submission outcome unconfirmed. Check the Lulu portal before retrying.</p>
+                @endif
+                @if($order->lulu_status === 'UNPAID')
+                    <p>Lulu payment required before production.</p>
+                @endif
             </div>
             <div>
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Product SKU</label>
@@ -101,11 +111,11 @@
             </div>
             <div>
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Print Cost Est.</label>
-                <p style="font-weight: 700; color: var(--text-main);">${{ number_format((float) $order->print_cost_estimate, 2) }}</p>
+                <p style="font-weight: 700; color: var(--text-main);">{{ $order->print_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->print_cost_estimate, 2) }}</p>
             </div>
             <div>
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Shipping Cost Est.</label>
-                <p style="font-weight: 700; color: var(--text-main);">${{ number_format((float) $order->shipping_cost_estimate, 2) }}</p>
+                <p style="font-weight: 700; color: var(--text-main);">{{ $order->shipping_cost_estimate === null ? 'Unavailable' : '$'.number_format((float) $order->shipping_cost_estimate, 2) }}</p>
             </div>
         </div>
 
