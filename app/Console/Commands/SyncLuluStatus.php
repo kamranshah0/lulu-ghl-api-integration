@@ -16,7 +16,8 @@ class SyncLuluStatus extends Command
      *
      * @var string
      */
-    protected $signature = 'lulu:sync-status';
+    protected $signature = 'lulu:sync-status
+        {--ghl-only : Retry pending GHL updates from saved statuses without Lulu calls or app emails}';
 
     /**
      * The console command description.
@@ -40,40 +41,57 @@ class SyncLuluStatus extends Command
      */
     public function handle()
     {
-        $this->info('🔄 Starting Lulu status synchronization...');
+        $ghlOnly = (bool) $this->option('ghl-only');
+        $this->info($ghlOnly
+            ? 'Retrying pending GHL updates from saved Lulu statuses (no Lulu calls or app emails).'
+            : '🔄 Starting Lulu status synchronization...');
 
-        // Query orders that are submitted but not finalized (Shipped/Rejected)
+        // Pending GHL updates include completed jobs whose last sync failed.
         $environment = config('services.lulu.use_sandbox', true) ? 'sandbox' : 'production';
         $unknown = Order::whereNull('lulu_environment')->whereNotNull('lulu_job_id')->count();
         if ($unknown) {
             $this->warn("{$unknown} historical jobs have an unverified environment. Use lulu:reconcile after checking their portal.");
         }
-        $orders = Order::where('lulu_environment', $environment)->where(function ($query) {
-            $query->whereIn('fulfillment_status', [
+        $orders = Order::where('lulu_environment', $environment)->where(function ($query) use ($ghlOnly) {
+            $query->where(function ($pending) {
+                $pending->whereNotNull('ghl_contact_id')->where('ghl_contact_id', '!=', '')->where(function ($status) {
+                    $status->whereNull('ghl_synced_status')->orWhereColumn('ghl_synced_status', '!=', 'lulu_status');
+                });
+            });
+
+            if ($ghlOnly) {
+                return;
+            }
+
+            $query->orWhereIn('fulfillment_status', [
                 'submitted_to_lulu',
                 'print_job_created',
                 'in_production',
-            ])->orWhere(function ($pending) {
-                $pending->whereNotNull('ghl_contact_id')->where(function ($status) {
-                    $status->whereNull('ghl_synced_status')->orWhereColumn('ghl_synced_status', '!=', 'lulu_status');
-                });
-            })->orWhere(function ($email) {
+            ])->orWhere(function ($email) {
                 $email->whereNotIn('fulfillment_status', ['failed', 'cancelled'])->where(function ($missing) {
                     $missing->whereDoesntHave('events', fn ($q) => $q->where('event_type', 'confirmation_email_sent'))
                         ->orWhereDoesntHave('events', fn ($q) => $q->where('event_type', 'admin_notification_email_sent'));
                 });
             });
-        })->whereNotNull('lulu_job_id')->lazyById(100);
+        })->whereNotNull('lulu_job_id')->where('lulu_job_id', '!=', '')->lazyById(100);
         $failures = 0;
 
         if ($orders->isEmpty()) {
-            $this->info('✅ No active orders to sync.');
+            $this->info($ghlOnly ? 'No pending GHL updates.' : '✅ No active orders to sync.');
 
             return 0;
         }
 
         foreach ($orders as $order) {
             try {
+                if ($ghlOnly) {
+                    if (! $this->syncGhl($order, (string) $order->lulu_status)) {
+                        $failures++;
+                    }
+
+                    continue;
+                }
+
                 $this->syncMissingCostEstimate($order);
 
                 $statusData = $this->luluApi->getPrintJobStatus($order->lulu_job_id);
@@ -98,10 +116,10 @@ class SyncLuluStatus extends Command
                     'lulu_job_id' => $order->lulu_job_id,
                     'error' => $e->getMessage(),
                 ]);
-                $order->logEvent('lulu_status_sync_failed', 'lulu', [
+                $order->logEvent($ghlOnly ? 'ghl_status_sync_failed' : 'lulu_status_sync_failed', $ghlOnly ? 'ghl' : 'lulu', [
                     'lulu_job_id' => $order->lulu_job_id,
                     'error' => $e->getMessage(),
-                ], 'Failed to fetch latest Lulu status.');
+                ], $ghlOnly ? 'Failed to retry saved GHL status.' : 'Failed to fetch latest Lulu status.');
             }
         }
 
@@ -171,6 +189,10 @@ class SyncLuluStatus extends Command
     {
         if ($order->ghl_contact_id) {
             try {
+                if (trim($luluStatus) === '' || $luluStatus === 'UNKNOWN') {
+                    throw new \RuntimeException('No known Lulu status to sync. Fetch the current Lulu status before retrying GHL.');
+                }
+
                 $synced = $this->ghlApi->updateContactFulfillmentStatus(
                     $order->ghl_contact_id,
                     $order->lulu_job_id,
@@ -181,6 +203,7 @@ class SyncLuluStatus extends Command
                 }
                 $order->update(['ghl_synced_status' => $luluStatus]);
                 $order->logEvent('ghl_status_synced', 'ghl', ['status' => $luluStatus], 'GHL fulfillment status updated.');
+                $this->info("GHL synced for order #{$order->id}.");
             } catch (\Throwable $e) {
                 Log::warning("SyncLuluStatus: Failed to sync GHL for order #{$order->id}", [
                     'error' => $e->getMessage(),
@@ -189,6 +212,7 @@ class SyncLuluStatus extends Command
                     'error' => $e->getMessage(),
                     'lulu_status' => $luluStatus,
                 ], 'GHL status sync failed; the saved Lulu job is unchanged. Check the error details.');
+                $this->error("GHL sync failed for order #{$order->id}: {$e->getMessage()}");
 
                 return false;
             }

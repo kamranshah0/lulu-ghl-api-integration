@@ -89,6 +89,11 @@ Merchant Lulu payment is separate from buyer payment collected in GHL.
 
 ### GHL synchronization
 
+- Operators can retry pending GHL field updates immediately with
+  `php artisan lulu:sync-status --ghl-only`, using saved Lulu statuses without
+  reprinting, calling Lulu, or resending app emails. Already-synced records and
+  orders outside the configured Lulu environment are skipped. GHL workflows may
+  react to field changes; this mode does not bypass authentication or configuration.
 - GHL synchronization must never undo a successfully created Lulu job if the GHL API call fails.
 - Store success/failure events for contact custom-field updates and timeline notes.
 - Status and Lulu job ID custom-field IDs are configuration, not hard-coded values.

@@ -1,6 +1,6 @@
 # Phase 1 Architecture
 
-Reviewed 2026-09-15 (GHL diagnostics and independent notification behavior).
+Reviewed 2026-10-06 (GHL-only immediate recovery option).
 
 ## Intake contract
 
@@ -32,7 +32,7 @@ failure. Shipping validation in the worker keeps incomplete orders visible.
 | LuluApiService | Auth, bounded TLS HTTP, print/cost/status contracts |
 | GhlApiService | Legacy or versioned contact fields/notes; honest result |
 | SendOrderEmails | Recipient-specific retries and successful-send guards |
-| SyncLuluStatus | Hourly status/cost/GHL recovery and missing email dispatch |
+| SyncLuluStatus | Hourly full recovery; --ghl-only retries saved pending GHL statuses without Lulu/mail |
 | Order / OrderEvent | Persistence, mapping, retry eligibility, timeline |
 | Admin controllers | Auth, dashboard, filters, CSV, detail/retry, profile |
 
@@ -82,6 +82,13 @@ have no automatic replay; status fields retry through polling. GHL workflows are
 external configuration; this app only sends initial SMTP order confirmations,
 not a new email on every fulfillment-status change.
 
+Manual lulu:sync-status --ghl-only reuses the existing syncGhl path and pending
+marker selection, including delivered/terminal jobs. It uses saved lulu_status,
+not a fresh Lulu request. It preserves job/payment/fulfillment state, skips already
+synced orders and other/unknown environments, and never dispatches app mail or
+contact notes. Missing/UNKNOWN statuses are rejected rather than sent as truth.
+External GHL automations may run on field changes. No cron changes are necessary.
+
 ## Tests
 
 - LuluAuthenticationTest: auth, cache/expiry, 401, payload contract, no 5xx POST replay.
@@ -89,6 +96,8 @@ not a new email on every fulfillment-status change.
 - OrderPipelineTest: intake, dispatch failure, retry barriers, environments, CSV.
 - StatusAndNotificationTest: sync, reconciliation, email retry, Blade routes.
 - GhlApiServiceTest: failure results and versioned payload shape.
+- GhlOnlySyncTest: bulk pending recovery, DELIVERED, repeat skip, environment/reference
+  guards, missing configuration/status, partial failures, no Lulu calls or app emails.
 
 PHPUnit uses in-memory SQLite and rejects stray HTTP. It cannot verify MySQL
 concurrency under load, hosted credentials, actual PDFs, inbox placement or cron.

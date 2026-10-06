@@ -1,6 +1,6 @@
 # Operations and Live Rollout
 
-Reviewed 2026-10-06 (GHL read-only authentication success and local mappings); older diagnostics retain their dates.
+Reviewed 2026-10-06 (immediate GHL-only recovery command); older diagnostics retain their dates.
 Workspace edits do not imply a production deployment.
 
 ## Authentication
@@ -123,6 +123,36 @@ config or assign every historical record to production.
 
 ## GHL sync and missing notifications
 
+### Immediate recovery after fixing hosted field mappings
+
+Deploy the updated app/Console/Commands/SyncLuluStatus.php first. No new migration
+or cron change is required. In the deployed project's artisan directory, refresh
+the config once after .env changes:
+
+```bash
+php artisan config:clear
+php artisan config:cache
+php artisan queue:restart
+```
+
+Then retry all pending GHL status updates immediately with one command:
+
+```bash
+php artisan lulu:sync-status --ghl-only
+```
+
+This uses SAVED Lulu statuses, including DELIVERED, for orders in the configured
+Lulu environment with a job ID and Contact ID. It updates GHL fields and local
+sync events/markers only. No Lulu requests, print submission, cost calculation,
+contact-note replay or app email dispatch occurs. Already-synced orders are skipped;
+unknown environments are excluded, and absent/UNKNOWN statuses fail for review.
+GHL field-change automations may still fire: this is a real external write, not a
+read-only diagnostic. Do not run concurrent manual copies or overlap intentionally
+with hourly sync; successful markers are not remote exactly-once guarantees.
+The command prints each result and exits 1 if any selected update fails, otherwise
+0. Old failure events remain in the timeline; look for new ghl_status_synced events.
+Unflagged lulu:sync-status retains full polling/cost/email recovery behavior.
+
 Latest October 6 local check after token rotation: field-list GET returned HTTP
 200 with Version v3. Both Lulu Contact TEXT fields and their location ownership
 were verified. Local .env now has GHL_API_VERSION=v3 and both actual field IDs.
@@ -197,6 +227,7 @@ No additional migration is required for the September 15 code changes.
 | lulu:test --fresh | External auth and token cache; no print |
 | lulu:test --full | Sandbox job creation; production disabled |
 | lulu:sync-status | Lulu reads/costs, DB updates, GHL writes, email dispatch |
+| lulu:sync-status --ghl-only | Saved pending statuses to GHL; DB sync events/markers; no Lulu calls or app emails; may trigger GHL workflows |
 | queue:work | Pending jobs, including real print creation |
 | schedule:run | Due tasks and their effects |
 

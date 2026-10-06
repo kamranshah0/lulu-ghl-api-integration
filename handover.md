@@ -1,8 +1,38 @@
 # Forever Wellthy - Handover
 
-Last reviewed: 2026-10-06 (rotated GHL token verified and local mappings configured; older evidence retains its original dates). Workspace changes are not a production deployment.
+Last reviewed: 2026-10-06 (immediate GHL-only recovery implemented and tested; older evidence retains its original dates). Workspace changes are not a production deployment.
+
+## Latest: immediate retry command after hosted mapping fix
+
+User confirms the three version/field-ID entries were previously omitted on the
+host and now added; requests one command to retry pending updates without waiting.
+Added --ghl-only to existing lulu:sync-status. It reuses saved Lulu statuses and
+existing GHL sync handling, including DELIVERED, skips already-synced orders and
+other/unknown environments, and preserves payment, fulfillment and print-job data.
+No Lulu API calls, prints, cost requests, contact-note replay or app email jobs.
+Missing/UNKNOWN statuses fail visibly; each GHL success/failure is printed and
+audited. GHL field-change workflows can still trigger. No new cron or migration.
+Deploy app/Console/Commands/SyncLuluStatus.php, refresh hosted config/workers once,
+then run php artisan lulu:sync-status --ghl-only from that deployed project.
+Do not intentionally overlap manual recovery with hourly sync or another copy.
+Verification: 49 local tests / 201 assertions passed; command help exposes the
+option. Tests use in-memory SQLite, fake GHL HTTP, mocked Lulu and fake bus/mail.
+Agent did not run the recovery against real orders or deploy it. Hosted success
+still needs a new GHL Status Synced event; old failure events are not removed.
 
 ## Current GHL checkpoint: local authentication and mappings pass
+
+Latest user report after deployment guidance: a sync event for DELIVERED says both
+GHL_CUSTOM_FIELD_ID_STATUS and GHL_CUSTOM_FIELD_ID_JOB_ID are missing. Fresh local
+bootstrap still resolves both verified IDs and v3. Thus that reported execution
+had missing/stale configuration; hosted .env, cache, worker and event timestamp
+need checking, not another Lulu submission. Supply the three non-secret mapping/
+version entries for the actual deployed project, refresh its config and workers,
+then inspect a NEW sync event. Old failure events remain historical evidence.
+This report does not verify a successful GHL write or current delivery externally.
+User also exposed API/webhook credentials in IDE context; recommend coordinated
+replacement without reproducing them. Webhook secret changes must match the GHL
+sender. Documentation-only follow-up; no external requests or config changes.
 
 After the user installed a newly rotated token, a read-only GET to the versioned
 custom-field endpoint with Version v3 returned HTTP 200. The 21 returned Contact
