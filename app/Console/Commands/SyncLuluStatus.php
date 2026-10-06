@@ -188,7 +188,7 @@ class SyncLuluStatus extends Command
                 $order->logEvent('ghl_status_sync_failed', 'ghl', [
                     'error' => $e->getMessage(),
                     'lulu_status' => $luluStatus,
-                ], 'Lulu status changed locally, but GHL update failed.');
+                ], 'GHL status sync failed; the saved Lulu job is unchanged. Check the error details.');
 
                 return false;
             }

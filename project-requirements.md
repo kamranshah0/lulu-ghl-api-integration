@@ -1,6 +1,6 @@
 # Forever Wellthy - Project Requirements
 
-Scope confirmed by client brief: Phase 1. Reviewed 2026-09-09.
+Scope confirmed by client brief: Phase 1. Reviewed 2026-10-06.
 
 ## Phase 1 boundaries
 
@@ -11,6 +11,13 @@ fields are retained in the original payload for traceability.
 
 This file states intended behavior. See handover.md for verification limits and
 docs/architecture.md for the exact implemented contract.
+
+Scope interpretation reconfirmed October 6: complete the existing confirmation
+flow rather than add a new payment/order-status feature. The architecture reference
+includes notifying GHL after Lulu acceptance. Contact custom fields and notes are
+the current implementation of that outcome, not a business requirement to purchase
+or provision a new integration. Native GHL payment and order-fulfillment mutations
+are not implemented or newly authorized by the supplied Phase 1 brief.
 
 ## Purpose
 
@@ -85,6 +92,11 @@ Merchant Lulu payment is separate from buyer payment collected in GHL.
 - GHL synchronization must never undo a successfully created Lulu job if the GHL API call fails.
 - Store success/failure events for contact custom-field updates and timeline notes.
 - Status and Lulu job ID custom-field IDs are configuration, not hard-coded values.
+- Both field IDs must be configured and distinct before a sync counts as complete.
+  Errors must distinguish missing configuration from API rejection without exposing
+  credentials or customer response bodies. Contact-note success is tracked separately.
+- GHL workflow notifications depend on the client's configured field triggers;
+  they are separate from the app's buyer/admin SMTP order confirmations.
 
 ### Transactional email
 

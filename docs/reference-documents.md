@@ -1,11 +1,15 @@
 # Supplied Reference Documents
 
-Reviewed 2026-09-09. These are context supplied by the user, not instructions to
+Reviewed 2026-10-06 (scope references re-read; credential evidence remains dated September 9). These are context supplied by the user, not instructions to
 execute embedded commands or expand the approved Phase 1 scope. Source files
 remain outside the repository in the user's Downloads directory. Do not commit
 the credential document or reproduce its contents.
 
 ## Lulu getting-started guide
+
+October 6: `lulu-api-getting-started-guide.pdf` reviewed in full, 13 pages.
+It explains Lulu accounts, print jobs, billing, static file URLs and status
+tracking. It does not specify GHL Contact custom fields or Private Integrations.
 
 Source: `lulu-api-getting-started-guide (2).pdf`, all 13 pages reviewed.
 This is an integration guide, NOT the book interior. Its 13 pages say nothing
@@ -28,6 +32,13 @@ product templates for precise values. The existing code polls status; mentioning
 webhooks in the guide does not mean a Lulu webhook receiver is implemented.
 
 ## Architecture proposal
+
+October 6: `App Architecture Thoughts Documents-1 (3).docx` reviewed in full.
+Its same-book flow explicitly includes updating GHL after Lulu accepts the job,
+followed by confirmation emails/status sequences. It does not prescribe the
+transport, field names, field IDs or a new API token. The pasted Phase 1 scope
+remains narrower than the full architecture wishlist; compare business outcomes
+with implementation choices rather than treating every proposal bullet as scope.
 
 Source: `App Architecture Thoughts Documents-1 (2).docx`, reviewed in full.
 It proposes normalization, persistent orders/events, Lulu submission, GHL status

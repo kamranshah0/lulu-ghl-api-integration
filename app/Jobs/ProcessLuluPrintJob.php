@@ -164,30 +164,44 @@ class ProcessLuluPrintJob implements ShouldQueue
 
             // ── Step 4: Optional — Update GHL Contact ─────────────────────
             if ($order->ghl_contact_id) {
+                $ghlStatusUpdated = false;
+                $ghlNoteAdded = false;
+                $statusError = null;
+                $noteError = null;
                 try {
                     $ghlStatusUpdated = $ghlApi->updateContactFulfillmentStatus(
                         contactId: $order->ghl_contact_id,
                         luluJobId: $luluJobId,
                         status: $order->lulu_status
                     );
+                    if ($ghlStatusUpdated) {
+                        $order->update(['ghl_synced_status' => $order->lulu_status]);
+                    } else {
+                        $statusError = 'GHL did not confirm the status update.';
+                    }
+                } catch (\Throwable $e) {
+                    $statusError = $e->getMessage();
+                }
+                // A status-field failure must not suppress the independent contact note.
+                try {
                     $ghlNoteAdded = $ghlApi->addContactNote(
                         contactId: $order->ghl_contact_id,
                         noteBody: "✅ Forever Wellthy book print job submitted to Lulu. Job ID: {$luluJobId}"
                     );
-
-                    $order->logEvent($ghlStatusUpdated && $ghlNoteAdded ? 'ghl_status_synced' : 'ghl_status_sync_failed', 'ghl', [
-                        'status_updated' => $ghlStatusUpdated,
-                        'note_added' => $ghlNoteAdded,
-                    ], $ghlStatusUpdated && $ghlNoteAdded ? 'GHL contact was updated with Lulu print job details.' : 'GHL update was incomplete. Check field configuration and API response.');
-                    if ($ghlStatusUpdated) {
-                        $order->update(['ghl_synced_status' => $order->lulu_status]);
+                    if (! $ghlNoteAdded) {
+                        $noteError = 'GHL did not confirm the contact note.';
                     }
                 } catch (\Throwable $e) {
-                    Log::warning("ProcessLuluPrintJob: GHL update failed for order #{$order->id}: ".$e->getMessage());
-                    $order->logEvent('ghl_status_sync_failed', 'ghl', [
-                        'error' => $e->getMessage(),
-                    ], 'Lulu job was created, but GHL contact update failed.');
+                    $noteError = $e->getMessage();
                 }
+                $order->logEvent($ghlStatusUpdated ? 'ghl_status_synced' : 'ghl_status_sync_failed', 'ghl', [
+                    'status_updated' => $ghlStatusUpdated,
+                    'error' => $statusError,
+                ], $ghlStatusUpdated ? 'GHL fulfillment fields updated.' : 'Lulu job was created, but GHL fulfillment fields were not updated.');
+                $order->logEvent($ghlNoteAdded ? 'ghl_note_added' : 'ghl_note_failed', 'ghl', [
+                    'note_added' => $ghlNoteAdded,
+                    'error' => $noteError,
+                ], $ghlNoteAdded ? 'GHL contact note added.' : 'GHL contact note failed; this does not block order emails.');
             }
 
             // ── Done ──────────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 # Phase 1 Architecture
 
+Reviewed 2026-09-15 (GHL diagnostics and independent notification behavior).
+
 ## Intake contract
 
 routes/api.php -> VerifyGhlWebhook -> WebhookController -> OrderData.
@@ -69,6 +71,16 @@ Costs are nullable and non-blocking. Backfill preserves any existing estimate.
 Page count comes from LULU_BOOK_PAGE_COUNT, not POD paper numbers.
 ghl_synced_status changes only on accepted field updates. Unsynced terminal orders
 remain eligible. Email events record transport acceptance, not delivery/read receipts.
+
+GhlApiService requires both configured status/job-ID fields with distinct IDs for
+fulfillment sync. Missing config, rejected HTTP, unsuccessful response flags and
+connection failures raise safe RuntimeExceptions. Callers preserve the Lulu job and
+record the error; the generic false-result fallback remains for alternate implementations.
+Initial contact-note attempts are independent of field sync. Their separate
+ghl_note_added/ghl_note_failed events do not change ghl_synced_status. Notes still
+have no automatic replay; status fields retry through polling. GHL workflows are
+external configuration; this app only sends initial SMTP order confirmations,
+not a new email on every fulfillment-status change.
 
 ## Tests
 

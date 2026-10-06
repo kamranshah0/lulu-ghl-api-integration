@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class GhlApiService
 {
@@ -35,8 +35,8 @@ class GhlApiService
      */
     public function updateContactCustomField(string $contactId, string $fieldId, $value): bool
     {
-        if (empty($this->apiKey) || empty($contactId) || empty($fieldId)) {
-            return false;
+        if (trim($this->apiKey) === '' || trim($contactId) === '' || trim($fieldId) === '') {
+            throw new \RuntimeException('GHL update requires an API key, contact ID and custom field ID.');
         }
 
         $body = $this->version === 'legacy' ? [
@@ -44,17 +44,29 @@ class GhlApiService
                 $fieldId => $value,
             ],
         ] : ['customFields' => [['id' => $fieldId, 'fieldValue' => $value]]];
-        $response = $this->request()->put("{$this->baseUrl}/contacts/".rawurlencode($contactId), $body);
-
-        if (! $response->successful()) {
-            Log::warning('GHL: Failed to update custom field.', [
-                'contact_id' => $contactId,
-                'field_id' => $fieldId,
-                'response' => $response->json(),
-            ]);
+        try {
+            $response = $this->request()->put("{$this->baseUrl}/contacts/".rawurlencode($contactId), $body);
+        } catch (ConnectionException) {
+            throw new \RuntimeException('GHL connection failed or timed out. Check network connectivity and retry status sync; do not resubmit the Lulu order.');
         }
 
-        return $response->successful() && $response->json('succeeded') !== false && $response->json('success') !== false;
+        if (! $response->successful()) {
+            $hint = match ($response->status()) {
+                401 => 'Check the GHL token and matching API version.',
+                403 => 'Check token permissions and access to the contact sub-account.',
+                404 => 'Check the API version, contact and custom field belong to the intended sub-account.',
+                400, 422 => 'Check custom field IDs, field types and allowed status values.',
+                429 => 'GHL rate limit reached. A later status sync can retry.',
+                default => 'Check GHL service availability and retry status sync.',
+            };
+            throw new \RuntimeException('GHL custom field update failed (HTTP '.$response->status().'). '.$hint);
+        }
+
+        if ($response->json('succeeded') === false || $response->json('success') === false) {
+            throw new \RuntimeException('GHL returned HTTP '.$response->status().' but reported the custom field update as unsuccessful. Check field configuration in GHL.');
+        }
+
+        return true;
     }
 
     /**
@@ -67,6 +79,19 @@ class GhlApiService
     ): bool {
         $statusFieldId = config('services.ghl.custom_field_id_status');
         $jobIdFieldId = config('services.ghl.custom_field_id_job_id');
+
+        $missing = [];
+        foreach (['GHL_API_KEY' => $this->apiKey, 'GHL_CUSTOM_FIELD_ID_STATUS' => $statusFieldId, 'GHL_CUSTOM_FIELD_ID_JOB_ID' => $jobIdFieldId] as $name => $value) {
+            if (trim((string) $value) === '') {
+                $missing[] = $name;
+            }
+        }
+        if ($missing) {
+            throw new \RuntimeException('GHL sync configuration missing: '.implode(', ', $missing).'. Configure the deployment environment, refresh config and restart workers.');
+        }
+        if ($statusFieldId === $jobIdFieldId) {
+            throw new \RuntimeException('GHL status and Lulu job ID must use different custom field IDs.');
+        }
 
         $results = [];
         if ($statusFieldId) {

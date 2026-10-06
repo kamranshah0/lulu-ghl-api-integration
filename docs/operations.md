@@ -1,6 +1,7 @@
 # Operations and Live Rollout
 
-Reviewed 2026-09-09. Workspace edits do not imply a production deployment.
+Reviewed 2026-10-06 (GHL read-only authentication success and local mappings); older diagnostics retain their dates.
+Workspace edits do not imply a production deployment.
 
 ## Authentication
 
@@ -67,6 +68,42 @@ These are local findings, not an inspection of hosted config. See handover.md.
 During rollback retain the new DB columns/audit data. Pause intake/workers before
 changing environments and review queued orders bound to the original environment.
 
+## cPanel cron alternative
+
+Screenshot reviewed September 10: both cron schedules are every minute, but the
+scheduler command appears to start with usr/local/bin/php (missing leading slash).
+The queue command is queue:work --stop-when-empty --tries=3 --timeout=90.
+No hosted cron entries have been changed or executed by the agent.
+
+Keep each schedule at `* * * * *`. Edit the existing entries, do not add duplicates.
+After deployment/migration and the readiness checks, use these commands if the
+PHP binary and application paths shown in the screenshot are correct on the host:
+
+Scheduler:
+
+```bash
+/usr/local/bin/php /home/p8xgatsddkuf/public_html/lulu.app.forever-wellthy.com/artisan schedule:run >> /home/p8xgatsddkuf/public_html/lulu.app.forever-wellthy.com/storage/logs/cron-scheduler.log 2>&1
+```
+
+Queue (alternative to the managed worker, not in addition to it):
+
+```bash
+/usr/local/bin/php /home/p8xgatsddkuf/public_html/lulu.app.forever-wellthy.com/artisan queue:work --stop-when-empty --tries=3 --timeout=240 --max-time=50 >> /home/p8xgatsddkuf/public_html/lulu.app.forever-wellthy.com/storage/logs/cron-worker.log 2>&1
+```
+
+Confirm PHP meets composer requirements, CLI pcntl is available for job timeouts,
+and the cron user can write storage/logs. Rotate these diagnostic files separately;
+shell redirection is not Laravel's daily log rotation.
+
+Set DB_QUEUE_RETRY_AFTER=360 for the database queue and refresh cached config during
+deployment. Job-level timeout overrides the CLI default (print 240, email 60).
+max-time=50 is evaluated between jobs, so a running job can continue longer and
+overlap the next cron invocation. It prevents indefinitely draining workers, not
+concurrent workers; order/email locks and queue reservations remain essential.
+If single-worker execution is required, use a verified host lock/managed worker.
+
+Changing cron does not resolve the PDF/GHL/database readiness findings above.
+
 ## Historical and uncertain orders
 
 Old lulu_environment values are intentionally null. Do not infer them from today's
@@ -83,6 +120,74 @@ config or assign every historical record to production.
   the marker; absence of a search result is not proof the POST was rejected.
 - Rejected jobs keep their IDs. Resolve PDF/address problems and agree a replacement
   or supported Lulu update flow; generic admin retry does not print replacements.
+
+## GHL sync and missing notifications
+
+Latest October 6 local check after token rotation: field-list GET returned HTTP
+200 with Version v3. Both Lulu Contact TEXT fields and their location ownership
+were verified. Local .env now has GHL_API_VERSION=v3 and both actual field IDs.
+Credentials and field IDs are not copied into this runbook; transfer them securely
+from the verified configuration to the intended host, preserving unrelated values.
+Deploy the new GHL_API_KEY, matching GHL_LOCATION_ID, GHL_API_VERSION and both
+GHL_CUSTOM_FIELD_ID_* mappings together; refresh config/restart workers as above.
+Read access does not prove contacts.write or live workflow notifications. Verify
+one existing order without reprinting under a controlled status-sync rollout.
+Full local suite: 44 tests/165 assertions, plus a fake-HTTP check of loaded mappings.
+Hosted setup and real GHL writes remain unverified. No database migration needed
+for this configuration-only task (earlier safety migrations still apply).
+
+Earlier October 6 local check (superseded locally): configured token has Private Integration format but mode is
+legacy. Legacy field-list GET returned 401; versioned field-list GET also returned
+401 using both 2021-07-28 and v3 headers. Do not assume a version-only switch fixes
+it or that these results describe the hosted credentials. Both field IDs are blank.
+Obtain a valid same-sub-account credential with contacts.readonly, contacts.write
+and locations/customFields.readonly; verify read access/field ownership before
+installing matching mode and field IDs. Do not rotate unrelated Lulu/SMTP secrets
+or run workers/sync as an authentication test. Full local suite: 44 tests/165
+assertions; no successful live GHL write or deployment verified.
+
+October 1 local preflight still stops on both missing field mappings before an
+HTTP write. User reports UI access granted; hosted configuration remains unknown.
+UI permissions and the app's API authorization are separate. Obtain a fresh hosted
+error after deploying diagnostics rather than assuming old screenshots prove its cause.
+For verified read-only field discovery, the versioned API provides
+GET /locations/:locationId/customFields?model=contact. Use returned id, not fieldKey;
+field names alone are not proof of ownership or suitability. Required read scope:
+locations/customFields.readonly. Contact verification uses contacts.readonly;
+updates require contacts.write. Do not post tokens into chat/screenshots.
+GHL's official migration guide says v1 is unsupported but existing integrations
+may continue to operate. Plan token/endpoint/version migration together; do not
+replace a working legacy key just because the user gained browser access.
+
+September 15 screenshots show IN_PRODUCTION polling followed by GHL sync failure.
+The old error combined missing configuration and API rejection. Local mappings
+were empty then; hosted mappings must be inspected, not assumed identical.
+
+1. Verify two CONTACT custom fields in the intended GHL sub-account: one for Lulu
+   status, one for job ID. Configure their distinct IDs as GHL_CUSTOM_FIELD_ID_STATUS
+   and GHL_CUSTOM_FIELD_ID_JOB_ID. Do not paste names or guessed IDs. Text fields
+   avoid rejecting raw statuses; if dropdowns are used, verify all allowed values.
+2. Verify the token belongs to that sub-account and has contact write permissions.
+   Keep the existing API mode unless deliberately migrating. Current official
+   versioned contact docs show Version: v3 and customFields id/fieldValue entries;
+   a legacy token is not automatically compatible with that API.
+3. Deploy diagnostics changes, refresh cached config and restart workers through
+   the established controlled rollout. Existing unsynced jobs are polled again;
+   no new print order is required to repair contact fields.
+4. Inspect GHL workflow triggers/history against the actual raw Lulu status values
+   (e.g. IN_PRODUCTION, SHIPPED). Updating a contact does not itself guarantee a
+   workflow notification; the client's workflow must be configured/published.
+5. Separately inspect confirmation_email_sent/failed and admin_notification_email_sent/failed
+   for the affected local order. No email events: check queued SendOrderEmails jobs,
+   deployed class and cron-worker logs. Failed event: investigate its SMTP/recipient
+   error. Sent event: transport accepted it; inspect provider delivery/bounce logs
+   and destination mailbox. Do not clear sent markers just to force a test resend.
+
+For manually placed orders, verify the existing Lulu job first. lulu:reconcile
+requires matching external_id; do not bypass that check if the manual job lacks
+the original GHL order reference. No generic retry of an already fulfilled order.
+Do not use queue:retry all or process unrelated historical jobs during diagnostics.
+No additional migration is required for the September 15 code changes.
 
 ## Command effects
 

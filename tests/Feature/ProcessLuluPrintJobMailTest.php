@@ -19,11 +19,22 @@ class ProcessLuluPrintJobMailTest extends TestCase
 
     public function test_it_sends_order_email_to_buyer_and_admin(): void
     {
+        $this->assertOrderNotifications(false);
+    }
+
+    public function test_ghl_status_failure_does_not_block_note_or_buyer_and_admin_email(): void
+    {
+        $this->assertOrderNotifications(true);
+    }
+
+    private function assertOrderNotifications(bool $ghlFails): void
+    {
         Mail::fake();
         config(['services.admin.email' => 'admin@example.com']);
 
         $order = Order::create([
             'ghl_order_id' => 'GHL-EMAIL-1001',
+            'ghl_contact_id' => 'test-contact',
             'lulu_environment' => 'sandbox',
             'payment_status' => 'paid',
             'fulfillment_status' => 'received',
@@ -63,6 +74,12 @@ class ProcessLuluPrintJobMailTest extends TestCase
         ]);
 
         $ghlApi = Mockery::mock(GhlApiService::class);
+        if ($ghlFails) {
+            $ghlApi->shouldReceive('updateContactFulfillmentStatus')->once()->andThrow(new \RuntimeException('GHL sync configuration missing: GHL_CUSTOM_FIELD_ID_STATUS.'));
+        } else {
+            $ghlApi->shouldReceive('updateContactFulfillmentStatus')->once()->andReturn(true);
+        }
+        $ghlApi->shouldReceive('addContactNote')->once()->andReturn(true);
 
         (new ProcessLuluPrintJob($order))->handle($luluApi, $ghlApi);
 
@@ -82,5 +99,9 @@ class ProcessLuluPrintJobMailTest extends TestCase
             'order_id' => $order->id,
             'event_type' => 'admin_notification_email_sent',
         ]);
+        $this->assertDatabaseHas('order_events', ['order_id' => $order->id, 'event_type' => 'ghl_note_added']);
+        $this->assertDatabaseHas('order_events', ['order_id' => $order->id, 'event_type' => $ghlFails ? 'ghl_status_sync_failed' : 'ghl_status_synced']);
+        $this->assertSame('LULU-123', $order->fresh()->lulu_job_id);
+        $this->assertSame('print_job_created', $order->fresh()->fulfillment_status);
     }
 }

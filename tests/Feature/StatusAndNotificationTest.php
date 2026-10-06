@@ -87,6 +87,28 @@ class StatusAndNotificationTest extends TestCase
         $this->artisan('lulu:sync-status')->assertExitCode(0);
     }
 
+    public function test_missing_ghl_fields_are_explained_without_blocking_email_recovery(): void
+    {
+        config(['services.lulu.use_sandbox' => true, 'services.admin.email' => 'admin@example.com',
+            'services.ghl.api_key' => 'test-token', 'services.ghl.custom_field_id_status' => null,
+            'services.ghl.custom_field_id_job_id' => null]);
+        Mail::fake();
+        $order = $this->order(['ghl_contact_id' => 'contact-1', 'lulu_status' => 'IN_PRODUCTION', 'fulfillment_status' => 'in_production']);
+        $api = Mockery::mock(LuluApiService::class);
+        $api->shouldReceive('getPrintJobStatus')->twice()->andReturn(['status' => ['name' => 'IN_PRODUCTION']]);
+        $api->shouldNotReceive('createPrintJob');
+        $this->app->instance(LuluApiService::class, $api);
+        $this->artisan('lulu:sync-status')->assertExitCode(1);
+        $event = $order->events()->where('event_type', 'ghl_status_sync_failed')->firstOrFail();
+        $this->assertStringContainsString('GHL_CUSTOM_FIELD_ID_STATUS', $event->payload['error']);
+        $this->assertStringContainsString('GHL_CUSTOM_FIELD_ID_JOB_ID', $event->payload['error']);
+        $this->assertNull($order->fresh()->ghl_synced_status);
+        Mail::assertSentCount(2);
+        $this->artisan('lulu:sync-status')->assertExitCode(1);
+        Mail::assertSentCount(2);
+        $this->assertSame('123', $order->fresh()->lulu_job_id);
+    }
+
     public function test_reconciliation_verifies_external_order_id_before_linking(): void
     {
         $order = $this->order(['lulu_job_id' => null, 'lulu_environment' => null, 'submission_started_at' => now()]);
