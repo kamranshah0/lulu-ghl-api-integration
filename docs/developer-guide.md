@@ -1,6 +1,6 @@
 # Developer Guide
 
-Verified against repository code: 2026-11-13. Credentials and production customer
+Verified against repository code: 2026-11-17 (cart alias follow-up). Credentials and production customer
 data are intentionally excluded. Start with ../handover.md for current evidence.
 
 ## What this application does
@@ -103,7 +103,11 @@ Current limits matter:
 - Structured cart items require verified physical_product_ids/non_print_product_ids
   in services.ghl. Only physical matches count; known digital offers are excluded;
   unknown IDs return 422. Product identity uses productId/product_id or nested
-  product.id/_id/string, never bare item.id, name or amount. Electronic-only carts
+  product.id/_id/string, never bare item.id or amount. ID-less items may match
+  explicit physical_product_titles/non_print_product_titles aliases. Matching
+  ignores case/repeated whitespace only; no substrings. Supplied supported IDs
+  always win, including rejection of unknown IDs despite a familiar title.
+  Overlapping normalized title lists are rejected. Electronic-only carts
   are acknowledged with ignored_non_print_order, logged, and not persisted/queued.
 - No-items input remains an approved book-only quantity contract. With no selector
   configured, one anonymous legacy item also remains supported. With mappings
@@ -155,6 +159,7 @@ Exact names are listed in ../project-requirements.md and config/services.php.
 | Lulu | Matching sandbox/production key+secret and flag, dotted POD, actual page count, static PDF URLs, contact email, shipping level |
 | GHL | Shared webhook secret, correct sub-account token/location, matching API version, two distinct API field IDs |
 | Cart | GHL_PHYSICAL_PRODUCT_IDS and GHL_NON_PRINT_PRODUCT_IDS: disjoint comma-separated actual product IDs |
+| Legacy cart aliases | GHL_PHYSICAL_PRODUCT_TITLES and GHL_NON_PRINT_PRODUCT_TITLES: disjoint exact titles separated by pipes, only for ID-less items |
 | Mail | SMTP transport/from/credentials/TLS and ADMIN_EMAIL; plain-text alternatives included |
 
 Current GHL implementation uses versioned mode when API version is not legacy.

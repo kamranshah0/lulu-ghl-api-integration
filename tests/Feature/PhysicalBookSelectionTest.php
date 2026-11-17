@@ -142,6 +142,138 @@ class PhysicalBookSelectionTest extends TestCase
         $this->assertSame(2, OrderData::fromGhlPayload($data)->quantity);
     }
 
+    private function titlePayload(int $books = 1): array
+    {
+        config([
+            'services.ghl.physical_product_titles' => ['Free Book + Domestic Shipping (US)'],
+            'services.ghl.non_print_product_titles' => ['Instant Digital Copy'],
+        ]);
+        $data = $this->payload();
+        $data['items'] = [
+            ['title' => 'Free Book + Domestic Shipping (US)', 'quantity' => $books],
+            ['title' => 'Instant Digital Copy', 'quantity' => 1],
+        ];
+
+        return $data;
+    }
+
+    public function test_explicit_title_aliases_select_only_book_quantities_without_product_ids(): void
+    {
+        foreach ([1, 2] as $books) {
+            $data = $this->titlePayload($books);
+            $data['items'] = array_reverse($data['items']);
+            $dto = OrderData::fromGhlPayload($data);
+            $this->assertSame($books, $dto->quantity);
+            $this->assertSame(1, $dto->excludedItemCount);
+            array_shift($data['items']);
+            $this->assertSame($books, OrderData::fromGhlPayload($data)->quantity);
+        }
+    }
+
+    public function test_title_aliases_support_nested_names_case_and_whitespace_only(): void
+    {
+        $data = $this->titlePayload(2);
+        $data['items'] = [
+            ['product' => ['name' => "  FREE BOOK + Domestic   Shipping (US)\t"], 'qty' => 2],
+            ['name' => 'instant digital copy', 'qty' => 1],
+        ];
+        $this->assertSame(2, OrderData::fromGhlPayload($data)->quantity);
+    }
+
+    public function test_title_aliases_never_override_known_or_unknown_product_ids(): void
+    {
+        Queue::fake();
+        $data = $this->titlePayload();
+        $data['items'] = [['productId' => 'physical-book', 'title' => 'Instant Digital Copy', 'quantity' => 2]];
+        $this->assertSame(2, OrderData::fromGhlPayload($data)->quantity);
+        $data['items'] = [
+            ['productId' => 'digital-bundle', 'title' => 'Free Book + Domestic Shipping (US)', 'quantity' => 1],
+        ];
+        $this->postJson('/api/webhooks/ghl', $data)->assertOk()->assertJsonPath('status', 'ignored_non_print_order');
+        $data['items'][0]['productId'] = 'unknown-upsell';
+        $this->postJson('/api/webhooks/ghl', $data)->assertStatus(422);
+        Queue::assertNothingPushed();
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_unknown_titles_do_not_use_substring_price_or_legacy_fallback(): void
+    {
+        Queue::fake();
+        $data = $this->titlePayload();
+        config(['services.ghl.physical_product_ids' => [], 'services.ghl.non_print_product_ids' => []]);
+        foreach (['test product', 'Free Book + Domestic Shipping (US) extra', 'Free Book', ''] as $title) {
+            $data['items'] = [['title' => $title, 'quantity' => 1, 'amount' => 9.97]];
+            $this->postJson('/api/webhooks/ghl', $data)->assertStatus(422);
+        }
+        Queue::assertNothingPushed();
+        $this->assertDatabaseCount('orders', 0);
+    }
+
+    public function test_normalized_title_alias_overlap_is_rejected(): void
+    {
+        $data = $this->titlePayload();
+        config(['services.ghl.non_print_product_titles' => [' free book + domestic   shipping (us) ']]);
+        $this->expectExceptionMessage('product titles must not overlap');
+        OrderData::fromGhlPayload($data);
+    }
+
+    public function test_title_only_webhooks_preserve_original_cart_and_ignore_electronic_only_events(): void
+    {
+        Queue::fake();
+        $data = $this->titlePayload();
+        $digitalOnly = $data;
+        array_shift($digitalOnly['items']);
+        $this->postJson('/api/webhooks/ghl', $digitalOnly)->assertOk()->assertJsonPath('status', 'ignored_non_print_order');
+        $this->assertDatabaseCount('orders', 0);
+        $this->postJson('/api/webhooks/ghl', $data)->assertStatus(202);
+        $order = Order::firstOrFail();
+        $this->assertSame(1, $order->quantity);
+        $this->assertSame('14.96', $order->amount_charged);
+        $this->assertSame($data, $order->raw_payload);
+        $this->postJson('/api/webhooks/ghl', $data)->assertJsonPath('status', 'duplicate_ignored');
+        Queue::assertPushed(ProcessLuluPrintJob::class, 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_title_only_queued_cart_is_corrected_before_cost_and_print_submission(): void
+    {
+        Bus::fake();
+        $order = $this->queuedOrder(['raw_payload' => $this->titlePayload()]);
+        $api = Mockery::mock(LuluApiService::class);
+        $api->shouldReceive('calculateCost')->once()->with(Mockery::type('array'), 1)->andReturn([]);
+        $api->shouldReceive('validatePrintConfiguration')->once();
+        $api->shouldReceive('getAccessToken')->once()->andReturn('fake-token');
+        $api->shouldReceive('createPrintJob')->once()->with(Mockery::type('array'), 'CART-1', 1)
+            ->andReturn(['id' => 'fake-lulu-job', 'status' => ['name' => 'CREATED']]);
+        (new ProcessLuluPrintJob($order))->handle($api, Mockery::mock(GhlApiService::class));
+        $this->assertSame(1, $order->fresh()->quantity);
+        $this->assertNull($order->fresh()->print_cost_estimate);
+        $this->assertDatabaseHas('order_events', ['event_type' => 'print_quantity_corrected']);
+    }
+
+    public function test_inspector_reports_title_only_selection_without_fulfilling_it(): void
+    {
+        Bus::fake();
+        $order = $this->queuedOrder(['raw_payload' => $this->titlePayload()]);
+        $this->artisan('ghl:inspect-cart', ['order' => $order->id])
+            ->expectsOutputToContain('Free Book + Domestic Shipping (US)')
+            ->expectsOutputToContain('Selected physical quantity: 1; excluded lines: 1.')
+            ->doesntExpectOutputToContain('buyer@example.com')
+            ->assertSuccessful();
+        $this->assertSame(2, $order->fresh()->quantity);
+        $this->assertDatabaseCount('order_events', 0);
+        Bus::assertNothingDispatched();
+        Http::assertNothingSent();
+    }
+
+    public function test_inspector_rejects_external_order_ids_before_database_lookup(): void
+    {
+        $this->artisan('ghl:inspect-cart', ['order' => '6aee-external-purchase-id'])
+            ->expectsOutputToContain('positive numeric LOCAL app order ID')
+            ->assertFailed();
+        Http::assertNothingSent();
+    }
+
     private function queuedOrder(array $extra = []): Order
     {
         return Order::create(array_merge([

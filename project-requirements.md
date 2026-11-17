@@ -1,6 +1,6 @@
 # Forever Wellthy - Project Requirements
 
-Scope confirmed by client brief: Phase 1. Reviewed 2026-11-13.
+Scope confirmed by client brief: Phase 1. Reviewed 2026-11-17 (cart compatibility).
 
 ## Phase 1 boundaries
 
@@ -43,7 +43,8 @@ The product name shown to customers and admins is **Forever Wellthy**. Do not us
   edition + audiobook fulfilled electronically by the client. It must contribute
   zero Lulu print quantity. Only physical-book lines count, including legitimate
   multi-copy purchases. The selector now enforces this with configured physical
-  and non-print product IDs. Live identities still need verification before rollout;
+  and non-print product IDs, with explicit exact title aliases for ID-less legacy
+  items only. Supplied IDs take priority. Live mixed-cart selection needs verification;
   see docs/bump-offer-diagnosis.md for configuration, compatibility and tests.
 
 - The webhook rejects invalid secrets and refuses production requests if `GHL_WEBHOOK_SECRET` is missing.
@@ -154,5 +155,6 @@ Exact values are intentionally not documented here.
 | Lulu | `LULU_CLIENT_KEY`, `LULU_CLIENT_SECRET`, `LULU_USE_SANDBOX`, `LULU_API_BASE`, `LULU_SANDBOX_API_BASE`, `LULU_CONTACT_EMAIL`, `LULU_BOOK_INTERIOR_URL`, `LULU_BOOK_COVER_URL`, `LULU_POD_PACKAGE_ID`, `LULU_BOOK_PAGE_COUNT`, `LULU_SHIPPING_LEVEL` |
 | GHL | `GHL_WEBHOOK_SECRET`, `GHL_API_KEY`, `GHL_API_VERSION`, `GHL_LOCATION_ID`, `GHL_CUSTOM_FIELD_ID_STATUS`, `GHL_CUSTOM_FIELD_ID_JOB_ID` |
 | Cart selection | `GHL_PHYSICAL_PRODUCT_IDS`, `GHL_NON_PRINT_PRODUCT_IDS` (verified product IDs, comma-separated) |
+| ID-less legacy carts | `GHL_PHYSICAL_PRODUCT_TITLES`, `GHL_NON_PRINT_PRODUCT_TITLES` (exact verified aliases, pipe-separated; never override IDs) |
 | Mail | `MAIL_MAILER`, `MAIL_SCHEME`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `MAIL_EHLO_DOMAIN` |
 | Admin notification | `ADMIN_EMAIL` |

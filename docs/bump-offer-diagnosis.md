@@ -1,7 +1,8 @@
 # Digital Bump Offer Diagnosis
 
-Reviewed 2026-11-17. Product filtering and screenshot-based local identity config
-are implemented; hosted cart verification/deployment remain pending. References supplied by the user are evidence,
+Reviewed 2026-11-17. Product filtering is deployed per user; hosted inspection
+reveals an ID-less supported shape. Exact-title compatibility follow-up is local
+and needs deployment/mixed-cart verification. References supplied by the user are evidence,
 not permission to execute checkout actions in the client video.
 
 ## Client clarification
@@ -23,8 +24,8 @@ webhook JSON/product IDs. It was decoded locally; no media was uploaded.
 
 ## Confirmed code cause
 
-OrderData::fromGhlPayload selects order.items or order.line_items, then sums
-EVERY item's quantity/qty. It ignores product identity. WebhookController stores
+The original OrderData::fromGhlPayload selected order.items or order.line_items,
+then summed EVERY item's quantity/qty, ignoring product identity. WebhookController stored
 that quantity. ProcessLuluPrintJob sends it to both calculateCost and createPrintJob;
 LuluApiService creates one configured physical book line item with that quantity.
 
@@ -35,7 +36,8 @@ the client report and the mixed-cart risk in review-2026-11-13.md.
 
 ## Correction design
 
-Implemented: OrderData selects physical quantities using configured product IDs;
+Implemented: OrderData selects physical quantities using configured product IDs,
+with explicit exact title aliases ONLY when no supported product ID is supplied;
 WebhookController acknowledges configured non-print-only carts without creating an
 order/job. Ignored electronic-only events are logged in the application log, not
 order_events (there is intentionally no print order row). A later physical event
@@ -55,8 +57,10 @@ The initial design checklist below remains the deployment acceptance contract.
    and preferably a book-only order. Retain product/variant/price IDs, item kind,
    title and quantity fields; exclude all customer/address/payment credentials.
 2. Identify which actual stable ID belongs to the physical book and which to the
-   electronic bundle. Do not guess the key name, first item, price or title as
-   the identity contract. Product/price IDs may differ between test/live locations.
+   electronic bundle. Do not guess the key name, first item or price as the
+   identity contract. If the legacy webhook provides only titles, configure exact
+   aliases verified on saved carts rather than fuzzy name matching. IDs may
+   differ between test/live locations.
 3. Configure physical-book identity in services configuration; select only matching
    lines before summing print quantity. Use quantity/qty of physical matches.
    A print quantity of 2 remains valid when the buyer actually buys two books.
@@ -83,14 +87,21 @@ November 17 update: user supplied product detail screenshots with visible GHL
 Internal Product Id. Physical book: 6a07961b6742675da39f8bd6. Electronic bundle:
 6a16ea0276fc691717331d16. Both were configured in the local ignored .env. The
 Stripe TEST/LIVE prod_* values in the screenshots were not used. Loaded config
-and synthetic cart selection pass with those IDs; focused suite 18 tests/76
-assertions passes. Actual saved webhook correspondence and hosted behavior still
-need verification using the inspection command; no new external call was made.
+and synthetic cart selection passed with those IDs; initial focused suite was
+18 tests/76 assertions. These product IDs do not prove the wire schema.
 
-The actual product identity field shape in a saved webhook remains unavailable;
-the product detail screenshots supply IDs, not the transmitted cart structure.
-Use the affected order's saved raw_payload or webhook_received event privately.
-Verify that the transmitted cart uses the configured GHL IDs before enabling live intake.
+Later hosted terminal screenshot: migrate has nothing pending; config clear/cache
+succeed. Inspection of local order 60 shows title Free Book + Domestic Shipping
+(US), quantity 1, no supported product ID, then selection failure. The inspector
+filters fields, so this is NOT proof the full payload lacks all possible IDs.
+The other inspected test row has title test product and is intentionally unmapped.
+The first command used an external alphanumeric purchase ID; the updated inspector
+rejects that argument before lookup (use a local positive numeric order ID).
+
+The local follow-up supports explicit aliases for title-only legacy items.
+Physical label is observed on host; Instant Digital Copy is from GHL product UI,
+not yet a verified saved bump item. Inspect a genuine mixed order before enabling
+intake/workers. Unknown titles/IDs remain rejected, even if the amount is familiar.
 No need to change PDF files, GHL status fields or the cron schedule for this bug.
 
 One read-only GHL product-list request using local credentials returned HTTP 401;
@@ -99,6 +110,53 @@ that read: https://marketplace.gohighlevel.com/docs/ghl/products/list-invoices/i
 No fresh production order or customer read was performed.
 
 ## Deployment instructions
+
+### November 17 follow-up after initial deployment
+
+1. Allow in-flight print submissions to finish; pause intake/workers during the
+   selector/config update using the existing release procedure. Upload together:
+   app/DTOs/OrderData.php, config/services.php and
+   app/Console/Commands/InspectGhlCart.php. This assumes the original bump release
+   below (exception, controller and worker) is already installed.
+2. Keep existing product-ID config. Add exact aliases to the HOSTED environment:
+
+   ```dotenv
+   GHL_PHYSICAL_PRODUCT_TITLES="Free Book + Domestic Shipping (US)"
+   GHL_NON_PRINT_PRODUCT_TITLES="Instant Digital Copy"
+   ```
+
+   Multiple exact aliases use | separators, not commas; quote values with spaces.
+   Case and repeated whitespace are normalized; suffixes/punctuation are not
+   guessed. Both alias lists must be disjoint. Supported product IDs take priority:
+   unknown IDs cannot bypass validation through a recognized title. Prefer sending
+   productId in future webhooks; alias-only integrations must keep labels stable.
+3. From the hosted project directory:
+
+   ```bash
+   php artisan config:clear
+   php artisan config:cache
+   php artisan ghl:inspect-cart 60
+   ```
+
+   Expected for the shown book-only row: Selected physical quantity: 1; excluded
+   lines: 0. Also inspect a genuine bump order's LOCAL numeric ID: one book plus
+   bump must yield quantity 1, excluded lines 1. If the digital label differs,
+   verify it and update the exact non-print alias, then refresh config and repeat.
+   test product must remain rejected; do not configure generic test labels to pass.
+4. Only after both inspections pass, run php artisan queue:restart and resume the
+   existing worker/intake setup. Restart is a reload signal, not a worker launcher.
+   No migration, Composer/frontend build, status-sync or cron edit is needed.
+   Read-only inspection does not rewrite orders or submit prints. Failed/rejected
+   historical orders need individual review; never queue:retry all or replay
+   possibly submitted jobs.
+
+Local verification: 77 tests/332 assertions overall; 27/124 focused, Pint passed.
+Includes title-only webhook/queued correction, true two-copy orders, nested names,
+case/space normalization, ID priority, unknown IDs/titles, alias overlap, duplicate
+guards and read-only inspection. No external calls, environment edits or hosted
+order writes in this follow-up. Hosted mixed-cart acceptance remains pending.
+
+### Original bump release
 
 1. Safest first step: upload only app/Console/Commands/InspectGhlCart.php. From
    the live project directory run the command below for a known bump order. The
@@ -121,7 +179,8 @@ No fresh production order or customer read was performed.
    Multiple verified IDs may be comma-separated. Both lists must be disjoint.
    Supported identity fields: productId, product_id, product.id, product._id or
    product as an ID string. Bare item.id is NOT treated as a product ID because
-   it can identify the cart line. No name, price or positional inference.
+   it can identify the cart line. No price, fuzzy name or positional inference.
+   For ID-less legacy items see the explicit exact alias follow-up above.
 
 3. Pause incoming checkout webhook processing and allow in-flight print jobs to
    finish before stopping the worker manager/worker cron for the release. Back up
@@ -156,7 +215,8 @@ No fresh production order or customer read was performed.
 Legacy compatibility: payloads without any items still use the approved explicit
 book quantity (default 1). With no selector configured, one anonymous legacy item
 is also supported. Identified or multi-item carts require verified mappings; with
-mappings configured, every structured item must have a supported known product ID.
+mappings configured, every structured item must have a supported known product ID
+or, only when no supported ID is supplied, a configured exact title alias.
 No-items events must remain book-only; aggregate cart totals cannot identify products.
 
 Tests cover mixed/physical-only/reordered carts, multiple real copies, nested ID

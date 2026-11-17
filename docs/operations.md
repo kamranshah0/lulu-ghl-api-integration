@@ -1,12 +1,15 @@
 # Operations and Live Rollout
 
-Reviewed 2026-11-13 (current evidence, delivered fix and onboarding); older diagnostics retain their dates.
+Reviewed 2026-11-17 (hosted cart inspection follow-up); older diagnostics retain their dates.
 Workspace edits do not imply a production deployment.
 
 ## Current evidence
 
-Confirmed bump correction is implemented locally but requires verified live product
-IDs before rollout. Follow [bump deployment steps](bump-offer-diagnosis.md#deployment-instructions).
+User hosted screenshot: config refresh succeeds, no migrations pending; inspection
+of local order 60 shows book title/qty but no supported product ID. The explicit
+ID-less title alias follow-up is local, not yet verified on the host. Follow
+[bump deployment steps](bump-offer-diagnosis.md#deployment-instructions), including
+the November 17 follow-up. Validate both book-only and mixed carts before resuming.
 The diagnostic can be uploaded first: php artisan ghl:inspect-cart LOCAL_ORDER_ID
 --products-only reads existing cart metadata with no API calls, writes or printing.
 Do not deploy selector runtime files into active intake without completing mapping.

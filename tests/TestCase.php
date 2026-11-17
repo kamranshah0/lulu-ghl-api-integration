@@ -11,7 +11,10 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
         Http::preventStrayRequests();
-        config(['services.ghl.physical_product_ids' => [], 'services.ghl.non_print_product_ids' => []]);
+        config([
+            'services.ghl.physical_product_ids' => [], 'services.ghl.non_print_product_ids' => [],
+            'services.ghl.physical_product_titles' => [], 'services.ghl.non_print_product_titles' => [],
+        ]);
     }
     //
 }

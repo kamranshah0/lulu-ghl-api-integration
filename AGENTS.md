@@ -26,9 +26,11 @@ statements are historical, not current readiness. Hosted health needs fresh evid
   pending statuses to GHL and can trigger workflows; no Lulu calls or app emails.
 - Current review: docs/review-2026-11-13.md. Developer entry: docs/developer-guide.md.
 - DELIVERED maps to local shipped; raw DELIVERED remains visible. Local fix awaits deployment.
-- Intake selects physical quantities via services.ghl physical_product_ids and
-  non_print_product_ids; unknown structured items fail closed. November 17 product
-  screenshot IDs are configured locally; hosted cart correspondence remains unverified.
+- Intake uses services.ghl physical_product_ids/non_print_product_ids first;
+  ID-less legacy items can use explicit physical_product_titles/non_print_product_titles
+  exact aliases (env lists separated by |). Unknown IDs never fall back to titles.
+  November 17 hosted inspector shows book title/qty only; follow-up needs deployment
+  and verification on a saved mixed cart. Product screenshot IDs are configured locally.
   See docs/bump-offer-diagnosis.md before deploying the selector.
 - Read-only product evidence: php artisan ghl:inspect-cart LOCAL_ORDER_ID --products-only.
 - No special external plugin or skill is required for Laravel/PHP work. Use skills

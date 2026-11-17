@@ -1,6 +1,6 @@
 # Phase 1 Architecture
 
-Reviewed 2026-11-13 (delivered mapping and developer onboarding).
+Reviewed 2026-11-17 (legacy title-only cart selection).
 
 ## Intake contract
 
@@ -11,8 +11,11 @@ A bare id must be an ORDER identifier, never a contact identifier.
 
 OrderData retains the original payload, including edition/product/personalization
 fields, in orders.raw_payload. Phase 1 prints the one configured static book;
-only configured physical product IDs contribute to print quantity. Configured
-non-print IDs contribute zero, and unknown structured cart identities return 422.
+only configured physical identities contribute to print quantity. Product IDs
+take priority; explicit exact title aliases can match ID-less legacy items only.
+Configured non-print identities contribute zero; unknown identities return 422.
+No price, substring or positional inference. An unknown supplied ID never falls
+back to a title. Normalized title configuration must be disjoint.
 Electronic-only events return 200 ignored_non_print_order with an application-log
 entry but no local print order or queue message. No-items legacy input is book-only.
 See bump-offer-diagnosis.md for identity aliases and configuration prerequisites.

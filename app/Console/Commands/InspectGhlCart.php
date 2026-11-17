@@ -17,6 +17,11 @@ class InspectGhlCart extends Command
 
     public function handle(): int
     {
+        if (filter_var($this->argument('order'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            $this->error('Use the positive numeric LOCAL app order ID from /admin/orders/ID, not a GHL purchase or Lulu job ID.');
+
+            return self::FAILURE;
+        }
         $record = Order::findOrFail($this->argument('order'));
         $raw = $record->raw_payload;
         $payload = is_array($raw) ? ($raw['payload'] ?? $raw) : null;
@@ -34,6 +39,7 @@ class InspectGhlCart extends Command
         }
 
         $this->info('Saved product fields only (no customer data). No order was changed.');
+        $this->line('Bare item id/_id, SKU and price IDs are diagnostic only, not product-ID mappings.');
         foreach ($items as $index => $item) {
             if (! is_array($item)) {
                 $this->error('Cart contains an unstructured item.');
@@ -41,7 +47,7 @@ class InspectGhlCart extends Command
                 return self::FAILURE;
             }
             $product = $item['product'] ?? null;
-            $fields = array_intersect_key($item, array_flip(['productId', 'product_id', 'name', 'title', 'quantity', 'qty']));
+            $fields = array_intersect_key($item, array_flip(['id', '_id', 'sku', 'priceId', 'price_id', 'productId', 'product_id', 'name', 'title', 'quantity', 'qty']));
             if (is_array($product)) {
                 $fields['product'] = array_intersect_key($product, array_flip(['id', '_id', 'name', 'title']));
             } elseif (is_string($product)) {
@@ -63,8 +69,9 @@ class InspectGhlCart extends Command
             $this->info('Selection: configured electronic-only order; no print needed.');
 
             return self::SUCCESS;
-        } catch (\InvalidArgumentException) {
+        } catch (\InvalidArgumentException $e) {
             $this->error('Selection needs review. Verify product mappings, quantities and original webhook structure.');
+            $this->line($e->getMessage());
 
             return self::FAILURE;
         }

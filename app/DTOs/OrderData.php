@@ -122,8 +122,13 @@ class OrderData
     {
         $physical = config('services.ghl.physical_product_ids', []);
         $nonPrint = config('services.ghl.non_print_product_ids', []);
+        $physicalTitles = array_map(self::normalizeProductTitle(...), config('services.ghl.physical_product_titles', []));
+        $nonPrintTitles = array_map(self::normalizeProductTitle(...), config('services.ghl.non_print_product_titles', []));
         if (array_intersect($physical, $nonPrint)) {
             throw new \InvalidArgumentException('GHL physical and non-print product IDs must not overlap.');
+        }
+        if (array_intersect($physicalTitles, $nonPrintTitles)) {
+            throw new \InvalidArgumentException('GHL physical and non-print product titles must not overlap.');
         }
 
         $quantity = 0;
@@ -137,16 +142,21 @@ class OrderData
                 $product = $item['product'] ?? null;
                 $id = self::firstFilled($item, [], ['productId', 'product_id'])
                     ?? (is_array($product) ? self::firstFilled($product, [], ['id', '_id']) : (is_string($product) ? trim($product) : null));
+                $id = $id === '' ? null : $id;
+                $title = self::normalizeProductTitle(self::firstFilled($item, is_array($product) ? $product : [], ['title', 'name']) ?? '');
 
-                if ($id !== null && in_array($id, $nonPrint, true)) {
+                // Explicit title aliases support older ID-less webhooks; never override a supplied product ID.
+                $isNonPrint = $id !== null ? in_array($id, $nonPrint, true) : ($title !== '' && in_array($title, $nonPrintTitles, true));
+                $isPhysical = $id !== null ? in_array($id, $physical, true) : ($title !== '' && in_array($title, $physicalTitles, true));
+                if ($isNonPrint) {
                     $excluded++;
 
                     continue;
                 }
                 // Preserve the original one-book item contract only when no selector is configured.
-                $legacySingleItem = ! $physical && ! $nonPrint && count($items) === 1 && $id === null;
-                if (! $legacySingleItem && ($id === null || ! in_array($id, $physical, true))) {
-                    throw new \InvalidArgumentException('Cannot identify a physical-book cart item. Configure verified GHL_PHYSICAL_PRODUCT_IDS and GHL_NON_PRINT_PRODUCT_IDS; every item needs a product ID.');
+                $legacySingleItem = ! $physical && ! $nonPrint && ! $physicalTitles && ! $nonPrintTitles && count($items) === 1 && $id === null;
+                if (! $legacySingleItem && ! $isPhysical) {
+                    throw new \InvalidArgumentException('Cannot identify a cart item. Configure verified GHL product ID mappings or, only for ID-less items, exact GHL_PHYSICAL_PRODUCT_TITLES and GHL_NON_PRINT_PRODUCT_TITLES aliases.');
                 }
             }
             $quantity += (int) $qty;
@@ -159,6 +169,11 @@ class OrderData
         }
 
         return [$quantity, $excluded];
+    }
+
+    private static function normalizeProductTitle(string $title): string
+    {
+        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', $title) ?? $title));
     }
 
     private static function buildBuyerName(array $customer, array $payload): string

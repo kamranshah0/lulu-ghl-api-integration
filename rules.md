@@ -1,6 +1,6 @@
 # Engineering Rules for This Repository
 
-Reviewed: 2026-11-13.
+Reviewed: 2026-11-17 (explicit legacy cart title aliases).
 
 Read `project-requirements.md` and `handover.md` before changing code. They contain the agreed product behavior and the current operational findings.
 
@@ -39,7 +39,10 @@ Read `project-requirements.md` and `handover.md` before changing code. They cont
 - Preserve raw Lulu statuses; DELIVERED maps to the existing local shipped enum.
 - Only configured physical products count as book copies; configured electronic
   offers are excluded. Unknown cart identities fail closed. Never infer product
-  identity from price, display name, cart position or a bare line-item ID.
+  identity from price, fuzzy display-name matching, cart position or a bare
+  line-item ID. Explicit configured exact title aliases may identify ID-less
+  legacy items only. Supplied supported product IDs always take priority; an
+  unknown ID cannot fall back to a familiar title. Verify aliases on saved carts.
 - Keep TLS verification enabled. Refresh on explicit auth rejection, but never
   automatically repeat a timed-out/5xx print-job POST.
 - Do not create a second Lulu job for an order that already has a successful Lulu submission/job ID unless an explicitly designed recovery flow is added.
