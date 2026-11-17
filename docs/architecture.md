@@ -1,6 +1,6 @@
 # Phase 1 Architecture
 
-Reviewed 2026-10-06 (GHL-only immediate recovery option).
+Reviewed 2026-11-13 (delivered mapping and developer onboarding).
 
 ## Intake contract
 
@@ -11,7 +11,11 @@ A bare id must be an ORDER identifier, never a contact identifier.
 
 OrderData retains the original payload, including edition/product/personalization
 fields, in orders.raw_payload. Phase 1 prints the one configured static book;
-all line-item quantities are interpreted as copies of it. Filter mixed carts in GHL.
+only configured physical product IDs contribute to print quantity. Configured
+non-print IDs contribute zero, and unknown structured cart identities return 422.
+Electronic-only events return 200 ignored_non_print_order with an application-log
+entry but no local print order or queue message. No-items legacy input is book-only.
+See bump-offer-diagnosis.md for identity aliases and configuration prerequisites.
 
 orders.ghl_order_id is unique. Intake stores order, event and database queue
 message in one transaction. Production must use the database queue on the same
@@ -33,6 +37,7 @@ failure. Shipping validation in the worker keeps incomplete orders visible.
 | GhlApiService | Legacy or versioned contact fields/notes; honest result |
 | SendOrderEmails | Recipient-specific retries and successful-send guards |
 | SyncLuluStatus | Hourly full recovery; --ghl-only retries saved pending GHL statuses without Lulu/mail |
+| InspectGhlCart | Read saved product metadata/validate selection; no integration calls or mutations |
 | Order / OrderEvent | Persistence, mapping, retry eligibility, timeline |
 | Admin controllers | Auth, dashboard, filters, CSV, detail/retry, profile |
 
@@ -48,6 +53,10 @@ The host still needs minute-by-minute schedule:run and a managed queue worker.
 - Definite 4xx rejection except 408 clears the marker; connection failures, 5xx
   and success without job ID keep it. No assumption of remote idempotency.
 - Admin retry never recreates an existing Lulu job, even when rejected.
+- Worker reselects quantities from saved raw cart data before cost/print only after
+  existing-job, uncertainty-marker and environment guards. Quantity changes clear
+  stale costs and log print_quantity_corrected. Queued electronic-only rows become
+  cancelled without API calls/email; unknown identities fail before submission.
 - Reconcile checks both Lulu job ID and external_id before linking existing state.
 
 Three attempts; print timeout 240 seconds; order lock 300 seconds; database queue
@@ -59,13 +68,15 @@ reservation 360 seconds. Shared persistent cache and restarted workers are requi
 | --- | --- |
 | CREATED, UNPAID, PAYMENT_IN_PROGRESS, PRODUCTION_READY, PRODUCTION_DELAYED | print_job_created |
 | IN_PRODUCTION | in_production |
-| SHIPPED | shipped |
+| SHIPPED, DELIVERED | shipped |
 | REJECTED, ERROR | failed |
 | CANCELED / CANCELLED | cancelled |
 
 Raw lulu_status is retained. Unknown statuses remain visible/polled; they do not
 imply printing or shipping. Job creation is not payment or completed normalization.
 GHL buyer payment and the merchant's Lulu printing payment are separate.
+DELIVERED previously used the default print_job_created mapping; November 13
+fix preserves its raw status while mapping it to the existing shipped enum.
 
 Costs are nullable and non-blocking. Backfill preserves any existing estimate.
 Page count comes from LULU_BOOK_PAGE_COUNT, not POD paper numbers.
@@ -98,6 +109,11 @@ External GHL automations may run on field changes. No cron changes are necessary
 - GhlApiServiceTest: failure results and versioned payload shape.
 - GhlOnlySyncTest: bulk pending recovery, DELIVERED, repeat skip, environment/reference
   guards, missing configuration/status, partial failures, no Lulu calls or app emails.
+- PhysicalBookSelectionTest: physical/digital quantities, ignored electronic-only
+  events, identity safety, duplicates, queued correction/cost contract, inspection.
 
 PHPUnit uses in-memory SQLite and rejects stray HTTP. It cannot verify MySQL
 concurrency under load, hosted credentials, actual PDFs, inbox placement or cron.
+
+Developer onboarding: developer-guide.md. Current findings and deployment limits:
+review-2026-11-13.md. Historical incidents are optional under history/.

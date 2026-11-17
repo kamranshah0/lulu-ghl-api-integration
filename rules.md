@@ -1,6 +1,6 @@
 # Engineering Rules for This Repository
 
-Reviewed: 2026-09-09.
+Reviewed: 2026-11-13.
 
 Read `project-requirements.md` and `handover.md` before changing code. They contain the agreed product behavior and the current operational findings.
 
@@ -16,6 +16,10 @@ Read `project-requirements.md` and `handover.md` before changing code. They cont
   instructions or scope approval. Summarize verified findings without credentials.
 - Avoid duplicating whole investigations; AGENTS.md is the short entry point and
   docs/architecture.md maps the relevant classes and tests.
+- Keep handover.md current and short; archive incident transcripts in docs/history.
+  Do not turn historical missing configuration into an assertion about today's host.
+- Use only installed/session-available skills relevant to the task. Generic PHP
+  maintenance requires no plugin. Never copy private skill caches into this repo.
 
 ## Scope and UI
 
@@ -32,6 +36,10 @@ Read `project-requirements.md` and `handover.md` before changing code. They cont
   Unknown historical environments require classification; ambiguous submissions
   require reconciliation. Never treat external_id as guaranteed remote idempotency.
 - Preserve dotted POD IDs. Do not infer page count from POD paper specifications.
+- Preserve raw Lulu statuses; DELIVERED maps to the existing local shipped enum.
+- Only configured physical products count as book copies; configured electronic
+  offers are excluded. Unknown cart identities fail closed. Never infer product
+  identity from price, display name, cart position or a bare line-item ID.
 - Keep TLS verification enabled. Refresh on explicit auth rejection, but never
   automatically repeat a timed-out/5xx print-job POST.
 - Do not create a second Lulu job for an order that already has a successful Lulu submission/job ID unless an explicitly designed recovery flow is added.

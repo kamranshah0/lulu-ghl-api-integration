@@ -75,6 +75,27 @@ class StatusAndNotificationTest extends TestCase
         $this->assertSame('SHIPPED', $order->fresh()->ghl_synced_status);
     }
 
+    public function test_delivered_order_is_repaired_without_regressing_or_polling_after_completion(): void
+    {
+        config(['services.lulu.use_sandbox' => true]);
+        $order = $this->order(['lulu_status' => 'DELIVERED', 'ghl_synced_status' => 'DELIVERED', 'ghl_contact_id' => 'contact-1']);
+        foreach (['confirmation_email_sent', 'admin_notification_email_sent'] as $event) {
+            $order->logEvent($event);
+        }
+        $api = Mockery::mock(LuluApiService::class);
+        $api->shouldReceive('getPrintJobStatus')->once()->with('123')->andReturn(['status' => ['name' => 'DELIVERED']]);
+        $this->app->instance(LuluApiService::class, $api);
+        $ghl = Mockery::mock(GhlApiService::class);
+        $ghl->shouldNotReceive('updateContactFulfillmentStatus');
+        $this->app->instance(GhlApiService::class, $ghl);
+
+        $this->artisan('lulu:sync-status')->assertSuccessful();
+        $this->assertSame('shipped', $order->fresh()->fulfillment_status);
+        $this->assertSame('DELIVERED', $order->fresh()->lulu_status);
+        $this->assertFalse($order->fresh()->canRetry());
+        $this->artisan('lulu:sync-status')->assertSuccessful();
+    }
+
     public function test_sync_does_not_query_other_or_unverified_environments(): void
     {
         config(['services.lulu.use_sandbox' => false]);

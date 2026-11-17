@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\OrderData;
+use App\Exceptions\NonPrintOrderException;
 use App\Jobs\ProcessLuluPrintJob;
 use App\Models\Order;
 use Illuminate\Http\JsonResponse;
@@ -84,6 +85,12 @@ class WebhookController extends Controller
                 }
 
                 $order->logEvent('webhook_received', 'ghl', $payload, 'Order received and stored from GHL.');
+                if ($orderData->excludedItemCount > 0) {
+                    $order->logEvent('print_items_selected', 'system', [
+                        'physical_quantity' => $orderData->quantity,
+                        'excluded_item_count' => $orderData->excludedItemCount,
+                    ], 'Electronic products excluded from Lulu print quantity.');
+                }
 
                 // ── Step 4: Dispatch async job ────────────────────────────────
                 ProcessLuluPrintJob::dispatch($order);
@@ -97,6 +104,10 @@ class WebhookController extends Controller
                 ], 202);
             });
 
+        } catch (NonPrintOrderException $e) {
+            Log::info('GHL Webhook: Non-print-only cart ignored. No print job queued.');
+
+            return response()->json(['status' => 'ignored_non_print_order']);
         } catch (\InvalidArgumentException $e) {
             Log::warning('GHL Webhook: Validation error.', ['error' => $e->getMessage()]);
 

@@ -1,7 +1,24 @@
 # Operations and Live Rollout
 
-Reviewed 2026-10-06 (immediate GHL-only recovery command); older diagnostics retain their dates.
+Reviewed 2026-11-13 (current evidence, delivered fix and onboarding); older diagnostics retain their dates.
 Workspace edits do not imply a production deployment.
+
+## Current evidence
+
+Confirmed bump correction is implemented locally but requires verified live product
+IDs before rollout. Follow [bump deployment steps](bump-offer-diagnosis.md#deployment-instructions).
+The diagnostic can be uploaded first: php artisan ghl:inspect-cart LOCAL_ORDER_ID
+--products-only reads existing cart metadata with no API calls, writes or printing.
+Do not deploy selector runtime files into active intake without completing mapping.
+No new migration or cron change. Existing submitted jobs are never rewritten.
+
+Read ../handover.md first. The October 6 user screenshot records one hosted
+DELIVERED GHL sync success. November 13 review did not connect to the host or
+external APIs. Local GHL v3/mappings are present, ADMIN_EMAIL is missing, local
+DB SELECT 1 failed, and npm build needs dependencies. See review-2026-11-13.md.
+The November DELIVERED -> shipped model fix needs deployment; no migration.
+Old September missing-field and PDF findings below are historical evidence,
+not fresh claims about deployed configuration. Do not bulk change working keys.
 
 ## Authentication
 
@@ -16,7 +33,7 @@ environment, copied/revoked keys, server overrides and workers with stale config
 TLS/network failures need CA/connectivity fixes, never disabled verification.
 Never share token/Authorization headers.
 
-The local keys were tested September 9: sandbox passed, production rejected.
+Historical evidence only: local keys tested September 9 passed sandbox and were rejected in production.
 The DIFFERENT pair in the supplied credential DOCX passed production and failed
 sandbox on the same date. Its Basic header matches the pair. It has not been
 installed in local .env or on the host. Hosted credentials have not been inspected.
@@ -25,10 +42,11 @@ shell history or a support ticket.
 
 ## Deploy
 
-Latest local readiness check (2026-09-09): production auth/cost API passed with
-document credentials in memory. Deployment is held: configured book URLs return
-HTML, GHL status/job-ID field IDs are empty, and local MySQL is unavailable.
-These are local findings, not an inspection of hosted config. See handover.md.
+Historical local readiness check (2026-09-09): production auth/cost API passed with
+document credentials in memory; the live switch was held because local URLs returned
+HTML, mappings were empty and local MySQL was unavailable. October GHL progress
+supersedes the missing-mapping finding. Verify today's host instead of reapplying
+the historical hold. See handover.md for latest evidence.
 
 1. Pause GHL intake, let workers finish, then stop the worker manager. Back up DB
    and deployment config. Review historical orders; never bulk replay sandbox jobs.
@@ -48,7 +66,7 @@ These are local findings, not an inspection of hosted config. See handover.md.
    GHL_API_VERSION=legacy for existing v1 keys. Versioned mode (e.g. v3) uses
    LeadConnector and a matching sub-account OAuth/Private Integration token.
    Set both GHL_CUSTOM_FIELD_ID_STATUS and GHL_CUSTOM_FIELD_ID_JOB_ID to verified
-   field IDs; neither is populated in the current local configuration.
+   field IDs. They were populated locally on October 6; inspect the target host.
 7. Before resuming workers:
 
    php artisan config:clear
@@ -160,10 +178,12 @@ Credentials and field IDs are not copied into this runbook; transfer them secure
 from the verified configuration to the intended host, preserving unrelated values.
 Deploy the new GHL_API_KEY, matching GHL_LOCATION_ID, GHL_API_VERSION and both
 GHL_CUSTOM_FIELD_ID_* mappings together; refresh config/restart workers as above.
-Read access does not prove contacts.write or live workflow notifications. Verify
-one existing order without reprinting under a controlled status-sync rollout.
+Read access does not prove contacts.write or live workflow notifications. A later
+user screenshot confirms one hosted write success; verify each new rollout with
+fresh evidence without reprinting an existing order.
 Full local suite: 44 tests/165 assertions, plus a fake-HTTP check of loaded mappings.
-Hosted setup and real GHL writes remain unverified. No database migration needed
+The later October screenshot is hosted evidence for one order, not an all-order
+or notification audit. No database migration needed
 for this configuration-only task (earlier safety migrations still apply).
 
 Earlier October 6 local check (superseded locally): configured token has Private Integration format but mode is
@@ -224,6 +244,7 @@ No additional migration is required for the September 15 code changes.
 | Command | Effects |
 | --- | --- |
 | php artisan test | In-memory DB, mocked HTTP/mail |
+| ghl:inspect-cart ORDER [--products-only] | Read saved product metadata/validate selection; no API calls, DB writes, prints or mail |
 | lulu:test --fresh | External auth and token cache; no print |
 | lulu:test --full | Sandbox job creation; production disabled |
 | lulu:sync-status | Lulu reads/costs, DB updates, GHL writes, email dispatch |

@@ -1,6 +1,6 @@
 # Forever Wellthy - Project Requirements
 
-Scope confirmed by client brief: Phase 1. Reviewed 2026-10-06.
+Scope confirmed by client brief: Phase 1. Reviewed 2026-11-13.
 
 ## Phase 1 boundaries
 
@@ -39,6 +39,13 @@ The product name shown to customers and admins is **Forever Wellthy**. Do not us
 
 ### GHL order intake
 
+- Client clarification (2026-11-13): the USD 4.99 checkbox bump is a digital
+  edition + audiobook fulfilled electronically by the client. It must contribute
+  zero Lulu print quantity. Only physical-book lines count, including legitimate
+  multi-copy purchases. The selector now enforces this with configured physical
+  and non-print product IDs. Live identities still need verification before rollout;
+  see docs/bump-offer-diagnosis.md for configuration, compatibility and tests.
+
 - The webhook rejects invalid secrets and refuses production requests if `GHL_WEBHOOK_SECRET` is missing.
 - GHL must trigger this endpoint only for completed paid book orders. Explicit
   unpaid/refunded/failed payment states are rejected; absent payment status relies
@@ -46,6 +53,10 @@ The product name shown to customers and admins is **Forever Wellthy**. Do not us
 - The order ID must be an actual purchase/order ID, not a contact ID. Quantities
   must be positive integers and include only the configured book, not unrelated upsells.
 - A duplicate webhook must not create a second Lulu job. `ghl_order_id` is the idempotency key.
+- Configured electronic-only carts return HTTP 200 ignored_non_print_order and
+  create no print order/queue entry; an application log records the ignore.
+  Unknown product identities return 422. Original cart amount/raw data remain
+  unchanged on accepted physical orders. Legacy no-items input is book-only.
 - The parser must accept common GHL payload shapes: direct payloads, `payload` wrappers, `order`, `customer`, `shippingAddress`, `shipping_address`, and `shipping` variants.
 - Required data must be normalized before Lulu receives it:
   - country must be a two-letter code, e.g. `US`;
@@ -88,6 +99,11 @@ Merchant Lulu payment is separate from buyer payment collected in GHL.
 - The admin order detail must show the buyer, normalized shipping address, Lulu job/status, product/POD ID, quantity, both cost estimates, error message, and the event audit timeline.
 
 ### GHL synchronization
+
+- Native GHL payment/order badges are not updated. Contact status/job fields
+  reflect raw Lulu progress; they are a shared Contact summary, not per-order
+  storage. Repeat-purchase behavior and mixed-cart filtering limits are recorded
+  in docs/review-2026-11-13.md for the next developer.
 
 - Operators can retry pending GHL field updates immediately with
   `php artisan lulu:sync-status --ghl-only`, using saved Lulu statuses without
@@ -137,5 +153,6 @@ Exact values are intentionally not documented here.
 | Queue | `QUEUE_CONNECTION` |
 | Lulu | `LULU_CLIENT_KEY`, `LULU_CLIENT_SECRET`, `LULU_USE_SANDBOX`, `LULU_API_BASE`, `LULU_SANDBOX_API_BASE`, `LULU_CONTACT_EMAIL`, `LULU_BOOK_INTERIOR_URL`, `LULU_BOOK_COVER_URL`, `LULU_POD_PACKAGE_ID`, `LULU_BOOK_PAGE_COUNT`, `LULU_SHIPPING_LEVEL` |
 | GHL | `GHL_WEBHOOK_SECRET`, `GHL_API_KEY`, `GHL_API_VERSION`, `GHL_LOCATION_ID`, `GHL_CUSTOM_FIELD_ID_STATUS`, `GHL_CUSTOM_FIELD_ID_JOB_ID` |
+| Cart selection | `GHL_PHYSICAL_PRODUCT_IDS`, `GHL_NON_PRINT_PRODUCT_IDS` (verified product IDs, comma-separated) |
 | Mail | `MAIL_MAILER`, `MAIL_SCHEME`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `MAIL_EHLO_DOMAIN` |
 | Admin notification | `ADMIN_EMAIL` |

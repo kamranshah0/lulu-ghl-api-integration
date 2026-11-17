@@ -2,7 +2,9 @@
 
 namespace App\Jobs;
 
+use App\DTOs\OrderData;
 use App\Exceptions\LuluApiException;
+use App\Exceptions\NonPrintOrderException;
 use App\Models\Order;
 use App\Services\GhlApiService;
 use App\Services\LuluApiService;
@@ -88,15 +90,31 @@ class ProcessLuluPrintJob implements ShouldQueue
         $order->updateFulfillmentStatus('processing', 'Job picked up by queue worker');
 
         try {
-            // ── Step 1: Validate we have required fields ──────────────────
-            $this->validateOrder($order);
             $environment = config('services.lulu.use_sandbox', true) ? 'sandbox' : 'production';
             if (! $order->lulu_environment) {
                 throw new \InvalidArgumentException('Historical order environment is unverified. Classify it with lulu:classify before retrying.');
             }
-            if ($order->lulu_environment && $order->lulu_environment !== $environment) {
+            if ($order->lulu_environment !== $environment) {
                 throw new \InvalidArgumentException('Order belongs to a different Lulu environment. Do not replay sandbox orders in production.');
             }
+            // Re-evaluate queued carts before any print POST, using the original product identities.
+            if ($order->raw_payload) {
+                $selected = OrderData::fromGhlPayload($order->raw_payload);
+                if ($selected->ghlOrderId !== $order->ghl_order_id) {
+                    throw new \InvalidArgumentException('Saved payload does not match this order. Review before printing.');
+                }
+                if ($selected->quantity !== $order->quantity) {
+                    $oldQuantity = $order->quantity;
+                    $order->update(['quantity' => $selected->quantity, 'print_cost_estimate' => null, 'shipping_cost_estimate' => null]);
+                    $order->logEvent('print_quantity_corrected', 'system', [
+                        'old_quantity' => $oldQuantity,
+                        'physical_quantity' => $selected->quantity,
+                        'excluded_item_count' => $selected->excludedItemCount,
+                    ], 'Queued order quantity corrected from original cart before Lulu submission.');
+                }
+            }
+            // ── Step 1: Validate we have required fields ──────────────────
+            $this->validateOrder($order);
             $order->update(['lulu_environment' => $environment]);
 
             // ── Step 1.5: Calculate Cost ─────────────────────────────
@@ -208,6 +226,9 @@ class ProcessLuluPrintJob implements ShouldQueue
             $order->update(['retry_count' => 0, 'error_message' => $order->fulfillment_status === 'failed' ? 'Lulu rejected the job. Inspect the Lulu job event for details.' : null]);
             SendOrderEmails::dispatch($order);
 
+        } catch (NonPrintOrderException $e) {
+            $order->update(['fulfillment_status' => 'cancelled', 'error_message' => null]);
+            $order->logEvent('non_print_order_ignored', 'system', [], 'Queued electronic-only order excluded from printing.');
         } catch (LuluApiException $e) {
             if ($e->getStatusCode() >= 400 && $e->getStatusCode() < 500 && $e->getStatusCode() !== 408) {
                 $order->update(['submission_started_at' => null]);

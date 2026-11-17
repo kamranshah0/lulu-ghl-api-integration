@@ -68,7 +68,7 @@ class Order extends Model
     public static function fulfillmentStatusFor(string $status): string
     {
         return match ($status) {
-            'SHIPPED' => 'shipped',
+            'SHIPPED', 'DELIVERED' => 'shipped',
             'REJECTED', 'ERROR' => 'failed',
             'CANCELED', 'CANCELLED' => 'cancelled',
             'IN_PRODUCTION' => 'in_production',

@@ -66,6 +66,8 @@ return [
         'location_id' => env('GHL_LOCATION_ID'),
         'custom_field_id_status' => env('GHL_CUSTOM_FIELD_ID_STATUS'),
         'custom_field_id_job_id' => env('GHL_CUSTOM_FIELD_ID_JOB_ID'),
+        'physical_product_ids' => array_values(array_filter(array_map('trim', explode(',', (string) env('GHL_PHYSICAL_PRODUCT_IDS', ''))), fn ($id) => $id !== '')),
+        'non_print_product_ids' => array_values(array_filter(array_map('trim', explode(',', (string) env('GHL_NON_PRINT_PRODUCT_IDS', ''))), fn ($id) => $id !== '')),
     ],
 
     /*

@@ -2,6 +2,8 @@
 
 namespace App\DTOs;
 
+use App\Exceptions\NonPrintOrderException;
+
 class OrderData
 {
     public function __construct(
@@ -18,7 +20,8 @@ class OrderData
         public int $quantity,
         public ?float $amountCharged,
         public ?string $contactId,
-        public array $rawPayload
+        public array $rawPayload,
+        public int $excludedItemCount = 0
     ) {}
 
     /**
@@ -41,7 +44,7 @@ class OrderData
             ?? $payload['shipping_address']
             ?? $payload['shipping']
             ?? $payload;
-        $items = $order['items'] ?? $order['line_items'] ?? [];
+        $items = $order['items'] ?? $order['line_items'] ?? $payload['items'] ?? $payload['line_items'] ?? [];
         foreach ([$order, $customer, $shipping, $items] as $part) {
             if (! is_array($part)) {
                 throw new \InvalidArgumentException('Order, customer, shipping and items must contain structured data.');
@@ -64,18 +67,7 @@ class OrderData
             throw new \InvalidArgumentException('Order ID is missing from payload.');
         }
 
-        // Calculate total quantity
-        $quantity = 0;
-        foreach ($items ?: [['quantity' => $order['quantity'] ?? $order['qty'] ?? 1]] as $item) {
-            $qty = is_array($item) ? ($item['quantity'] ?? $item['qty'] ?? 1) : null;
-            if (filter_var($qty, FILTER_VALIDATE_INT) === false || (int) $qty < 1) {
-                throw new \InvalidArgumentException('Each item quantity must be a positive integer.');
-            }
-            $quantity += (int) $qty;
-        }
-        if ($quantity > 10000) {
-            throw new \InvalidArgumentException('Order quantity exceeds the supported limit.');
-        }
+        [$quantity, $excludedItemCount] = self::printQuantity($items, $order);
         $amount = self::firstFilled($order, $payload, ['totalAmount', 'total_amount', 'amount']);
         if ($amount !== null && (! is_numeric($amount) || (float) $amount < 0 || (float) $amount > 99999999.99)) {
             throw new \InvalidArgumentException('Order amount must be a non-negative numeric value.');
@@ -118,11 +110,55 @@ class OrderData
                 'shipping_zip',
             ]) ?? '',
             country: $country,
-            quantity: (int) $quantity,
+            quantity: $quantity,
             amountCharged: $amount === null ? null : (float) $amount,
             contactId: self::firstFilled($order, $payload, ['contactId', 'contact_id']) ?? self::firstFilled($customer, [], ['contactId', 'contact_id']),
-            rawPayload: $data
+            rawPayload: $data,
+            excludedItemCount: $excludedItemCount
         );
+    }
+
+    private static function printQuantity(array $items, array $order): array
+    {
+        $physical = config('services.ghl.physical_product_ids', []);
+        $nonPrint = config('services.ghl.non_print_product_ids', []);
+        if (array_intersect($physical, $nonPrint)) {
+            throw new \InvalidArgumentException('GHL physical and non-print product IDs must not overlap.');
+        }
+
+        $quantity = 0;
+        $excluded = 0;
+        foreach ($items ?: [['quantity' => $order['quantity'] ?? $order['qty'] ?? 1]] as $item) {
+            $qty = is_array($item) ? ($item['quantity'] ?? $item['qty'] ?? 1) : null;
+            if (filter_var($qty, FILTER_VALIDATE_INT) === false || (int) $qty < 1) {
+                throw new \InvalidArgumentException('Each item quantity must be a positive integer.');
+            }
+            if ($items) {
+                $product = $item['product'] ?? null;
+                $id = self::firstFilled($item, [], ['productId', 'product_id'])
+                    ?? (is_array($product) ? self::firstFilled($product, [], ['id', '_id']) : (is_string($product) ? trim($product) : null));
+
+                if ($id !== null && in_array($id, $nonPrint, true)) {
+                    $excluded++;
+
+                    continue;
+                }
+                // Preserve the original one-book item contract only when no selector is configured.
+                $legacySingleItem = ! $physical && ! $nonPrint && count($items) === 1 && $id === null;
+                if (! $legacySingleItem && ($id === null || ! in_array($id, $physical, true))) {
+                    throw new \InvalidArgumentException('Cannot identify a physical-book cart item. Configure verified GHL_PHYSICAL_PRODUCT_IDS and GHL_NON_PRINT_PRODUCT_IDS; every item needs a product ID.');
+                }
+            }
+            $quantity += (int) $qty;
+        }
+        if ($quantity > 10000) {
+            throw new \InvalidArgumentException('Order quantity exceeds the supported limit.');
+        }
+        if ($quantity === 0) {
+            throw new NonPrintOrderException('Order contains only configured non-print products.');
+        }
+
+        return [$quantity, $excluded];
     }
 
     private static function buildBuyerName(array $customer, array $payload): string

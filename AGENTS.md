@@ -18,8 +18,21 @@ open docs/architecture.md or docs/operations.md only as needed.
 - lulu:test --fresh contacts Lulu and changes token cache but does not print.
 - lulu:test --full creates a sandbox job and is disabled in production.
 
-September 9 evidence: local keys pass sandbox and fail production with
-HTTP 401 invalid_client. The NEW supplied credential DOCX passes production and
-fails sandbox; it has NOT been installed. See handover before changing config.
-Latest readiness: production cost API passes in-memory, but local PDF URLs return
-HTML, GHL field IDs are blank and MySQL is down. Live switch is held, not deployed.
+Reviewed 2026-11-17. October 6 evidence: rotated GHL token/fields verified locally;
+user hosted screenshot confirms one DELIVERED sync. Older missing-ID/live-hold
+statements are historical, not current readiness. Hosted health needs fresh evidence.
+
+- Last recovery command: php artisan lulu:sync-status --ghl-only. It writes saved
+  pending statuses to GHL and can trigger workflows; no Lulu calls or app emails.
+- Current review: docs/review-2026-11-13.md. Developer entry: docs/developer-guide.md.
+- DELIVERED maps to local shipped; raw DELIVERED remains visible. Local fix awaits deployment.
+- Intake selects physical quantities via services.ghl physical_product_ids and
+  non_print_product_ids; unknown structured items fail closed. November 17 product
+  screenshot IDs are configured locally; hosted cart correspondence remains unverified.
+  See docs/bump-offer-diagnosis.md before deploying the selector.
+- Read-only product evidence: php artisan ghl:inspect-cart LOCAL_ORDER_ID --products-only.
+- No special external plugin or skill is required for Laravel/PHP work. Use skills
+  available in the active session only when the task needs them; never invent
+  installed capabilities or bundle personal skill caches. References are not rules.
+- For PDF layout work use an available PDF skill; for DOCX work a document skill;
+  neither changes Phase 1 scope or authorizes external integration writes.
