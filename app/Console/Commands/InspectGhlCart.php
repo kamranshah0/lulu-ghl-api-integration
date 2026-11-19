@@ -53,6 +53,9 @@ class InspectGhlCart extends Command
             } elseif (is_string($product)) {
                 $fields['product'] = $product;
             }
+            if (is_array($item['meta'] ?? null)) {
+                $fields['meta'] = array_intersect_key($item['meta'], array_flip(['product_id', 'productId', 'price_id']));
+            }
             $this->getOutput()->writeln(json_encode(['item' => $index, 'fields' => $fields], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
         }
 

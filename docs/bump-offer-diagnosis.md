@@ -1,9 +1,26 @@
 # Digital Bump Offer Diagnosis
 
-Reviewed 2026-11-17. Product filtering is deployed per user; hosted inspection
+Reviewed 2026-11-19. Product filtering is deployed per user; hosted inspection
 reveals an ID-less supported shape. Exact-title compatibility follow-up is local
 and needs deployment/mixed-cart verification. References supplied by the user are evidence,
 not permission to execute checkout actions in the client video.
+
+## November 19 Actual Wire Evidence
+
+User's failed order 61 screenshot finally exposes line_items[].meta.product_id.
+These GLOBAL IDs match the configured physical/digital GHL product IDs. Bare
+item.id values instead identify funnel products. The actual digital title is
+Instant Digital Copy + Audiobook, so the earlier Instant Digital Copy UI alias
+alone does not identify every saved bump. Parser/inspector now support safe meta
+product-ID fields, keeping ID priority and fail-closed unknown identities.
+User terminal output confirms book-only order 60 passes after the title fallback.
+Mixed-cart recovery still needs hosted verification with ghl:inspect-cart 61.
+
+Order 61 also has a distinct HTTP 400 street1-length failure; see
+[targeted diagnosis and recovery](order-61-recovery-2026-11-19.md). Do not retry
+until both address formatting and physical quantity are checked, and any manual
+fulfillment is ruled out. Earlier "wire shape unavailable" checkpoints below are
+historical. No live retry has been performed by the agent.
 
 ## Client clarification
 
@@ -177,8 +194,9 @@ order writes in this follow-up. Hosted mixed-cart acceptance remains pending.
    ```
 
    Multiple verified IDs may be comma-separated. Both lists must be disjoint.
-   Supported identity fields: productId, product_id, product.id, product._id or
-   product as an ID string. Bare item.id is NOT treated as a product ID because
+   Supported identity fields: productId, product_id, product.id, product._id,
+   product as an ID string, then meta.product_id/meta.productId (November 19).
+   Bare item.id is NOT treated as a global product ID because
    it can identify the cart line. No price, fuzzy name or positional inference.
    For ID-less legacy items see the explicit exact alias follow-up above.
 

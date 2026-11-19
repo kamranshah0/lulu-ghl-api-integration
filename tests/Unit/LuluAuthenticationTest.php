@@ -113,4 +113,22 @@ class LuluAuthenticationTest extends TestCase
         }
         Http::assertSentCount(5);
     }
+
+    public function test_cost_and_print_requests_use_identical_lossless_street_splitting(): void
+    {
+        Http::fake([
+            '*/token' => Http::response(['access_token' => 'test-token']),
+            '*/print-jobs/' => Http::response(['id' => 123]),
+            '*/print-job-cost-calculations/' => Http::response(['shipping_cost' => 5]),
+        ]);
+        $address = ['street1' => '12345 Example Road Boulevard Unit 5', 'street2' => 'Building B'];
+        $api = new LuluApiService;
+        $api->calculateCost($address, 1);
+        $api->createPrintJob($address, 'ORDER-1', 1);
+        $expected = ['street1' => '12345 Example Road Boulevard', 'street2' => 'Unit 5 Building B'];
+        foreach (['/print-jobs/', '/print-job-cost-calculations/'] as $path) {
+            Http::assertSent(fn ($r) => str_ends_with($r->url(), $path) && $r['shipping_address'] === $expected && $r['line_items'][0]['quantity'] === 1);
+        }
+        Http::assertSentCount(3);
+    }
 }

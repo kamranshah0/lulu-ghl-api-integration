@@ -124,7 +124,14 @@
                 <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i> Lulu Shipping Payload
             </summary>
             <div style="padding: 1rem; background: #1e293b; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; overflow-x: auto;">
-                <pre style="line-height: 1.6;">{{ json_encode($order->getShippingAddressArray(), JSON_PRETTY_PRINT) }}</pre>
+                @php
+                    try {
+                        $shippingPreview = json_encode(\App\Services\LuluApiService::normalizeShippingAddress($order->getShippingAddressArray()), JSON_PRETTY_PRINT);
+                    } catch (\InvalidArgumentException $e) {
+                        $shippingPreview = $e->getMessage();
+                    }
+                @endphp
+                <pre style="line-height: 1.6;">{{ $shippingPreview }}</pre>
             </div>
         </details>
 

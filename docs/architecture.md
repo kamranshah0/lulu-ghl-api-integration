@@ -1,6 +1,6 @@
 # Phase 1 Architecture
 
-Reviewed 2026-11-17 (legacy title-only cart selection).
+Reviewed 2026-11-19 (metadata identities and lossless address formatting).
 
 ## Intake contract
 
@@ -19,6 +19,17 @@ back to a title. Normalized title configuration must be disjoint.
 Electronic-only events return 200 ignored_non_print_order with an application-log
 entry but no local print order or queue message. No-items legacy input is book-only.
 See bump-offer-diagnosis.md for identity aliases and configuration prerequisites.
+Actual funnel evidence now identifies stable IDs at line_items[].meta.product_id;
+bare item.id is the funnel product ID, not the configured global product ID.
+New intake also accepts total_price/total_cart_price amount aliases; retry does
+not backfill old stored null amounts or treat a total as payment verification.
+
+LuluApiService::normalizeShippingAddress prepares two <=30-character street lines
+at word boundaries without dropping tokens or overwriting the saved address.
+Overflow precedes existing street2; inability to fit fails locally. Worker
+preflights this before integration calls/submission marker; cost/print use the same
+prepared address. Admin payload preview shows prepared lines or validation error.
+The service also normalizes both endpoints for callers outside the worker.
 
 orders.ghl_order_id is unique. Intake stores order, event and database queue
 message in one transaction. Production must use the database queue on the same

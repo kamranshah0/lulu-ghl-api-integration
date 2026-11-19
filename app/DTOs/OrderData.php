@@ -68,7 +68,7 @@ class OrderData
         }
 
         [$quantity, $excludedItemCount] = self::printQuantity($items, $order);
-        $amount = self::firstFilled($order, $payload, ['totalAmount', 'total_amount', 'amount']);
+        $amount = self::firstFilled($order, $payload, ['totalAmount', 'total_amount', 'amount', 'total_price', 'total_cart_price']);
         if ($amount !== null && (! is_numeric($amount) || (float) $amount < 0 || (float) $amount > 99999999.99)) {
             throw new \InvalidArgumentException('Order amount must be a non-negative numeric value.');
         }
@@ -141,8 +141,8 @@ class OrderData
             if ($items) {
                 $product = $item['product'] ?? null;
                 $id = self::firstFilled($item, [], ['productId', 'product_id'])
-                    ?? (is_array($product) ? self::firstFilled($product, [], ['id', '_id']) : (is_string($product) ? trim($product) : null));
-                $id = $id === '' ? null : $id;
+                    ?? (is_array($product) ? self::firstFilled($product, [], ['id', '_id']) : (is_string($product) && trim($product) !== '' ? trim($product) : null))
+                    ?? (is_array($item['meta'] ?? null) ? self::firstFilled($item['meta'], [], ['product_id', 'productId']) : null);
                 $title = self::normalizeProductTitle(self::firstFilled($item, is_array($product) ? $product : [], ['title', 'name']) ?? '');
 
                 // Explicit title aliases support older ID-less webhooks; never override a supplied product ID.

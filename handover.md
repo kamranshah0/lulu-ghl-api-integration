@@ -1,6 +1,6 @@
 # Forever Wellthy - Current Handover
 
-Reviewed: 2026-11-17 (hosted title-only inspection follow-up). Start here, then rules.md. Do not read the archive by default.
+Reviewed: 2026-11-19 (order 61 address rejection and safe recovery). Start here, then rules.md. Do not read the archive by default.
 
 ## Outcome and scope
 
@@ -11,6 +11,29 @@ Keep the existing Blade theme. Phase 2 personalization is discussed, NOT impleme
 See project-requirements.md for scope and docs/developer-guide.md for implementation.
 
 ## Latest operational evidence
+
+November 19 copied live logs/screenshot diagnosis: order 61 failed three times
+on November 13 with HTTP 400 MAX_LENGTH_EXCEEDED at street1 (40 chars; limit 30).
+This is not an auth error or proof that code editing caused the failure. No
+job ID in the supplied screenshot; later manual fulfillment must still be ruled out.
+Actual webhook has line_items[].meta.product_id and bump title Instant Digital
+Copy + Audiobook. Global IDs match configured mappings; bare item.id is a funnel ID.
+
+Local correction: lossless street splitting shared by cost/print + worker preflight
+before submission marker; raw saved address stays unchanged. Inspector/parser now
+recognize meta.product_id; new intake recognizes total_price/total_cart_price.
+Admin payload preview shows prepared lines/validation without a theme change.
+89 tests / 388 assertions pass; copied real request formats to 30/9 chars with all
+address tokens intact. No live/API/email/DB changes or retries were performed.
+Deploy and inspect 61, confirm no manual job, then use Retry Fulfillment once.
+Exact files/steps: docs/order-61-recovery-2026-11-19.md. No new env keys/migration.
+
+User terminal output after November 17 confirms book-only order 60 now selects
+quantity 1, excluded lines 0. Mixed-cart recovery/deployment remain unverified.
+Earlier ID-less/title-only observation below was limited by inspector filtering;
+the November 19 screenshot establishes the missing meta.product_id wire shape.
+
+### November 17 checkpoint (superseded where noted above)
 
 November 17 user hosted terminal screenshot: migrate reports nothing pending;
 config clear/cache succeed. ghl:inspect-cart 60 prints physical book title + qty 1,
@@ -107,6 +130,7 @@ See docs/operations.md for full commands and cron. Existing hourly schedule stay
 | Class/flow detail | docs/architecture.md |
 | Deployment, cron, diagnosis and recovery | docs/operations.md |
 | Current risks, verification and follow-ups | docs/review-2026-11-13.md |
+| Order 61 failure and targeted hosted recovery | docs/order-61-recovery-2026-11-19.md |
 | Old incident reasoning only | docs/history/handover-through-2026-10-06.md |
 | Supplied references | docs/reference-documents.md |
 

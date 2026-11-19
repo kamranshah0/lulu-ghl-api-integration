@@ -1,6 +1,6 @@
 # Forever Wellthy - Project Requirements
 
-Scope confirmed by client brief: Phase 1. Reviewed 2026-11-17 (cart compatibility).
+Scope confirmed by client brief: Phase 1. Reviewed 2026-11-19 (address and funnel metadata compatibility).
 
 ## Phase 1 boundaries
 
@@ -63,6 +63,13 @@ The product name shown to customers and admins is **Forever Wellthy**. Do not us
   - country must be a two-letter code, e.g. `US`;
   - US state must be a two-letter code, e.g. `MO`;
   - known GHL spelling variants of Missouri, including `Missroii`, must resolve to `MO`.
+- Shipping street lines must fit Lulu's 30-character limits without losing
+  address information. Split overflow at word boundaries into street2 while
+  retaining any existing line2. Unrepresentable addresses require manual review;
+  saved originals remain unchanged. Cost and print use identical prepared lines.
+- Real funnel item.meta.product_id identifies global products; bare item.id
+  must not be confused with it. Full total_price/total_cart_price amounts are
+  supported for intake, not treated as proof of a completed payment.
 - Validation failures must return HTTP 422. Unexpected failures must return HTTP 500 without exposing internals to the caller.
 
 ### Lulu fulfillment

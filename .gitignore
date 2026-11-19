@@ -1,4 +1,6 @@
 *.log
+/Lulu Live Logs /
+/Lulu Live Logs/
 .DS_Store
 .env
 .env.backup

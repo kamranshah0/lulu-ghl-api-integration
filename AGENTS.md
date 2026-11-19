@@ -18,7 +18,7 @@ open docs/architecture.md or docs/operations.md only as needed.
 - lulu:test --fresh contacts Lulu and changes token cache but does not print.
 - lulu:test --full creates a sandbox job and is disabled in production.
 
-Reviewed 2026-11-17. October 6 evidence: rotated GHL token/fields verified locally;
+Reviewed 2026-11-19. October 6 evidence: rotated GHL token/fields verified locally;
 user hosted screenshot confirms one DELIVERED sync. Older missing-ID/live-hold
 statements are historical, not current readiness. Hosted health needs fresh evidence.
 
@@ -29,10 +29,14 @@ statements are historical, not current readiness. Hosted health needs fresh evid
 - Intake uses services.ghl physical_product_ids/non_print_product_ids first;
   ID-less legacy items can use explicit physical_product_titles/non_print_product_titles
   exact aliases (env lists separated by |). Unknown IDs never fall back to titles.
-  November 17 hosted inspector shows book title/qty only; follow-up needs deployment
-  and verification on a saved mixed cart. Product screenshot IDs are configured locally.
+  Hosted order 60 book-only inspection passes; mixed-cart recovery needs deployment
+  and verification. Product screenshot IDs are configured locally.
   See docs/bump-offer-diagnosis.md before deploying the selector.
 - Read-only product evidence: php artisan ghl:inspect-cart LOCAL_ORDER_ID --products-only.
+- November 19: real webhook screenshot identifies global IDs at line_items[].meta.product_id;
+  bare item.id is a funnel ID. Order 61 failed HTTP 400: street1 length 40, limit 30.
+  Local fix splits street lines without truncation, uses meta IDs and preserves retry
+  guards. Read docs/order-61-recovery-2026-11-19.md before any hosted retry. No retry run.
 - No special external plugin or skill is required for Laravel/PHP work. Use skills
   available in the active session only when the task needs them; never invent
   installed capabilities or bundle personal skill caches. References are not rules.

@@ -1,6 +1,6 @@
 # Engineering Rules for This Repository
 
-Reviewed: 2026-11-17 (explicit legacy cart title aliases).
+Reviewed: 2026-11-19 (address limits and targeted failed-order recovery).
 
 Read `project-requirements.md` and `handover.md` before changing code. They contain the agreed product behavior and the current operational findings.
 
@@ -48,6 +48,10 @@ Read `project-requirements.md` and `handover.md` before changing code. They cont
 - Do not create a second Lulu job for an order that already has a successful Lulu submission/job ID unless an explicitly designed recovery flow is added.
 - Keep cost failures non-blocking, but visible in logs and `order_events`.
 - Preserve the normalized Lulu address contract: `name`, `street1`, `street2`, `city`, `state_code`, `postcode`, `country_code`, `phone_number`.
+- Preserve original address data. Prepare Lulu street lines within 30 characters
+  at word boundaries; never silently truncate/abbreviate an address or discard an
+  existing second line. If lossless splitting cannot fit, fail before submission.
+  Cost and print must use the same prepared address and physical quantity.
 - State/country normalization is business-critical. Add a regression test for every parser edge case fixed.
 - Treat raw webhook data, address data, and emails as sensitive customer data. Do not print them in browser responses or casual diagnostics.
 

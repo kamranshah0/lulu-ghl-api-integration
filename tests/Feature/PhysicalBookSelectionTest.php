@@ -285,6 +285,76 @@ class PhysicalBookSelectionTest extends TestCase
         ], $extra));
     }
 
+    private function funnelPayload(): array
+    {
+        $data = $this->payload();
+        unset($data['items'], $data['amount']);
+        $data['order'] = ['id' => 'CART-1'];
+        $data['total_price'] = 14.96;
+        $data['line_items'] = [
+            ['id' => 'funnel-book', 'title' => 'Free Book + Domestic Shipping (US)', 'quantity' => 1, 'meta' => ['product_id' => 'physical-book', 'price_id' => 'book-price']],
+            ['id' => 'funnel-bump', 'title' => 'Instant Digital Copy + Audiobook', 'quantity' => 1, 'meta' => ['product_id' => 'digital-bundle', 'price_id' => 'bump-price']],
+        ];
+
+        return $data;
+    }
+
+    public function test_real_funnel_metadata_shape_selects_book_and_preserves_full_total(): void
+    {
+        Queue::fake();
+        $data = $this->funnelPayload();
+        $dto = OrderData::fromGhlPayload($data);
+        $this->assertSame(1, $dto->quantity);
+        $this->assertSame(1, $dto->excludedItemCount);
+        $this->assertSame(14.96, $dto->amountCharged);
+        $this->postJson('/api/webhooks/ghl', $data)->assertStatus(202);
+        $order = Order::firstOrFail();
+        $this->assertSame('14.96', $order->amount_charged);
+        $this->assertSame($data, $order->raw_payload);
+        $this->artisan('ghl:inspect-cart', ['order' => $order->id])
+            ->expectsOutputToContain('"product_id":"digital-bundle"')
+            ->expectsOutputToContain('Selected physical quantity: 1; excluded lines: 1.')
+            ->assertSuccessful();
+        Http::assertNothingSent();
+    }
+
+    public function test_unknown_metadata_id_cannot_bypass_selection_through_a_known_title(): void
+    {
+        $data = $this->funnelPayload();
+        config(['services.ghl.physical_product_titles' => ['Free Book + Domestic Shipping (US)']]);
+        $data['line_items'][0]['meta']['product_id'] = 'unknown-product';
+        $this->expectException(\InvalidArgumentException::class);
+        OrderData::fromGhlPayload($data);
+    }
+
+    public function test_failed_funnel_order_recovery_splits_address_and_prints_only_one_book(): void
+    {
+        Bus::fake();
+        $street = '12345 Example Road Boulevard Unit 5';
+        $order = $this->queuedOrder([
+            'raw_payload' => $this->funnelPayload(), 'shipping_address1' => $street,
+            'shipping_address2' => 'Building B', 'fulfillment_status' => 'failed',
+        ]);
+        $expected = LuluApiService::normalizeShippingAddress($order->getShippingAddressArray());
+        $api = Mockery::mock(LuluApiService::class);
+        $api->shouldReceive('calculateCost')->once()->with($expected, 1)->andReturn(['print_cost' => 5.79, 'shipping_cost' => 5.69]);
+        $api->shouldReceive('validatePrintConfiguration')->once();
+        $api->shouldReceive('getAccessToken')->once()->andReturn('fake-token');
+        $api->shouldReceive('createPrintJob')->once()->with($expected, 'CART-1', 1)
+            ->andReturn(['id' => 'fake-recovery-job', 'status' => ['name' => 'CREATED']]);
+        (new ProcessLuluPrintJob($order))->handle($api, Mockery::mock(GhlApiService::class));
+        $fresh = $order->fresh();
+        $this->assertSame(1, $fresh->quantity);
+        $this->assertSame($street, $fresh->shipping_address1);
+        $this->assertSame('Building B', $fresh->shipping_address2);
+        $this->assertSame('fake-recovery-job', $fresh->lulu_job_id);
+        $this->assertSame('5.79', $fresh->print_cost_estimate);
+        $this->assertSame('5.69', $fresh->shipping_cost_estimate);
+        $this->assertFalse($fresh->canRetry());
+        $this->assertDatabaseHas('order_events', ['event_type' => 'print_quantity_corrected']);
+        Bus::assertDispatched(SendOrderEmails::class, 1);
+    }
+
     public function test_worker_rechecks_old_queued_quantity_before_cost_and_print_calls(): void
     {
         Bus::fake();

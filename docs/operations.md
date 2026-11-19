@@ -1,9 +1,17 @@
 # Operations and Live Rollout
 
-Reviewed 2026-11-17 (hosted cart inspection follow-up); older diagnostics retain their dates.
+Reviewed 2026-11-19 (order 61 recovery); older diagnostics retain their dates.
 Workspace edits do not imply a production deployment.
 
 ## Current evidence
+
+Order 61: copied live logs establish three November 13 HTTP 400 street1 length
+rejections (40 chars; max 30), not an auth failure. Lossless street splitting and
+real funnel meta.product_id support are implemented locally, 89 tests/388 assertions.
+See [targeted recovery](order-61-recovery-2026-11-19.md) for release files and the
+reviewed admin retry procedure. No live retry run; first rule out a manual job.
+User output confirms order 60 book-only selection now passes. Prior title-only
+observation below was an inspector filtering limitation, not proof IDs were absent.
 
 User hosted screenshot: config refresh succeeds, no migrations pending; inspection
 of local order 60 shows book title/qty but no supported product ID. The explicit

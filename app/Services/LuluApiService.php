@@ -113,6 +113,7 @@ class LuluApiService
     public function createPrintJob(array $shippingAddress, string $ghlOrderId, int $quantity = 1): array
     {
         $this->validatePrintConfiguration();
+        $shippingAddress = self::normalizeShippingAddress($shippingAddress);
         $payload = [
             'contact_email' => config('services.lulu.contact_email'),
             'external_id' => $ghlOrderId,
@@ -192,6 +193,7 @@ class LuluApiService
      */
     public function calculateCost(array $shippingAddress, int $quantity = 1): array
     {
+        $shippingAddress = self::normalizeShippingAddress($shippingAddress);
         if ((int) config('services.lulu.book_page_count') < 1) {
             throw new \InvalidArgumentException('LULU_BOOK_PAGE_COUNT must match the final interior PDF.');
         }
@@ -230,6 +232,32 @@ class LuluApiService
         ]);
 
         return $data;
+    }
+
+    /** Prepare carrier-sized lines without altering the saved address or dropping tokens. */
+    public static function normalizeShippingAddress(array $address): array
+    {
+        $street1 = trim(preg_replace('/\s+/u', ' ', (string) ($address['street1'] ?? '')) ?? '');
+        $street2 = trim(preg_replace('/\s+/u', ' ', (string) ($address['street2'] ?? '')) ?? '');
+        if (mb_strlen($street1) > 30) {
+            $split = mb_strrpos(mb_substr($street1, 0, 31), ' ');
+            if ($split === false || $split === 0) {
+                throw new \InvalidArgumentException('Shipping street1 cannot fit Lulu\'s 30-character limit without splitting a word. Review the address before retrying.');
+            }
+            $street2 = trim(mb_substr($street1, $split).' '.$street2);
+            $street1 = mb_substr($street1, 0, $split);
+        }
+        if (mb_strlen($street2) > 30) {
+            throw new \InvalidArgumentException('Shipping address cannot fit Lulu\'s two 30-character street lines without losing data. Review the address before retrying.');
+        }
+        if (array_key_exists('street1', $address)) {
+            $address['street1'] = $street1;
+        }
+        if ($street2 !== '' || array_key_exists('street2', $address)) {
+            $address['street2'] = $street2;
+        }
+
+        return $address;
     }
 
     public static function extractCostBreakdown(array $costResponse): array

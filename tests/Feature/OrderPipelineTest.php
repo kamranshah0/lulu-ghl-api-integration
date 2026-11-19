@@ -107,6 +107,51 @@ class OrderPipelineTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_admin_retry_queues_an_unsubmitted_failed_order_only_once(): void
+    {
+        Queue::fake();
+        config(['services.lulu.use_sandbox' => true]);
+        $order = $this->order(['fulfillment_status' => 'failed']);
+        $this->actingAs(User::factory()->create())->post('/admin/orders/'.$order->id.'/retry')->assertSessionHas('success');
+        $this->post('/admin/orders/'.$order->id.'/retry')->assertSessionHas('error');
+        Queue::assertPushed(ProcessLuluPrintJob::class, 1);
+        $this->assertDatabaseHas('order_events', ['order_id' => $order->id, 'event_type' => 'admin_manual_retry']);
+    }
+
+    public function test_admin_retry_blocks_uncertain_submissions_even_without_a_job_id(): void
+    {
+        Queue::fake();
+        config(['services.lulu.use_sandbox' => true]);
+        $order = $this->order(['fulfillment_status' => 'failed', 'submission_started_at' => now()]);
+        $this->actingAs(User::factory()->create())->post('/admin/orders/'.$order->id.'/retry')->assertSessionHas('error');
+        Queue::assertNothingPushed();
+        $this->assertNotNull($order->fresh()->submission_started_at);
+    }
+
+    public function test_unsplittable_address_fails_locally_before_cost_auth_or_print_calls(): void
+    {
+        Bus::fake();
+        $order = $this->order(['shipping_address1' => str_repeat('x', 31)]);
+        try {
+            (new ProcessLuluPrintJob($order))->handle(Mockery::mock(LuluApiService::class), Mockery::mock(GhlApiService::class));
+            $this->fail('Address must be reviewed before a print request.');
+        } catch (\InvalidArgumentException) {
+            $this->assertNull($order->fresh()->submission_started_at);
+            $this->assertNull($order->fresh()->lulu_job_id);
+            $this->assertSame('failed', $order->fresh()->fulfillment_status);
+        }
+        Bus::assertNothingDispatched();
+    }
+
+    public function test_admin_payload_preview_shows_split_lines_or_safe_validation_without_crashing(): void
+    {
+        $order = $this->order(['shipping_address1' => '12345 Example Road Boulevard Unit 5']);
+        $this->actingAs(User::factory()->create())->get('/admin/orders/'.$order->id)
+            ->assertOk()->assertSee('"street2": "Unit 5"');
+        $order->update(['shipping_address1' => str_repeat('x', 31)]);
+        $this->get('/admin/orders/'.$order->id)->assertOk()->assertSee('Review the address before retrying.');
+    }
+
     public function test_malformed_payload_returns_validation_error(): void
     {
         config(['services.ghl.webhook_secret' => 'test-secret']);

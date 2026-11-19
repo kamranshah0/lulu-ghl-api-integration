@@ -115,12 +115,13 @@ class ProcessLuluPrintJob implements ShouldQueue
             }
             // ── Step 1: Validate we have required fields ──────────────────
             $this->validateOrder($order);
+            $shippingAddress = LuluApiService::normalizeShippingAddress($order->getShippingAddressArray());
             $order->update(['lulu_environment' => $environment]);
 
             // ── Step 1.5: Calculate Cost ─────────────────────────────
             try {
                 $costResponse = $luluApi->calculateCost(
-                    shippingAddress: $order->getShippingAddressArray(),
+                    shippingAddress: $shippingAddress,
                     quantity: $order->quantity
                 );
 
@@ -143,7 +144,7 @@ class ProcessLuluPrintJob implements ShouldQueue
                 Log::warning("ProcessLuluPrintJob: Cost calculation failed for order #{$order->id}: ".$e->getMessage());
                 $order->logEvent('lulu_cost_calculation_failed', 'lulu', [
                     'error' => $e->getMessage(),
-                    'shipping_address' => $order->getShippingAddressArray(),
+                    'shipping_address' => $shippingAddress,
                 ], 'Lulu cost calculation failed. Print job submission will still be attempted.');
             }
 
@@ -156,7 +157,7 @@ class ProcessLuluPrintJob implements ShouldQueue
             $order->update(['submission_started_at' => now()]);
 
             $luluResponse = $luluApi->createPrintJob(
-                shippingAddress: $order->getShippingAddressArray(),
+                shippingAddress: $shippingAddress,
                 ghlOrderId: $order->ghl_order_id,
                 quantity: $order->quantity
             );

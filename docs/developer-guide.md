@@ -1,6 +1,6 @@
 # Developer Guide
 
-Verified against repository code: 2026-11-17 (cart alias follow-up). Credentials and production customer
+Verified against repository code: 2026-11-19 (order 61 recovery). Credentials and production customer
 data are intentionally excluded. Start with ../handover.md for current evidence.
 
 ## What this application does
@@ -103,7 +103,8 @@ Current limits matter:
 - Structured cart items require verified physical_product_ids/non_print_product_ids
   in services.ghl. Only physical matches count; known digital offers are excluded;
   unknown IDs return 422. Product identity uses productId/product_id or nested
-  product.id/_id/string, never bare item.id or amount. ID-less items may match
+  product.id/_id/string, then meta.product_id/meta.productId, never bare item.id
+  or amount. ID-less items may match
   explicit physical_product_titles/non_print_product_titles aliases. Matching
   ignores case/repeated whitespace only; no substrings. Supplied supported IDs
   always win, including rejection of unknown IDs despite a familiar title.
@@ -114,6 +115,13 @@ Current limits matter:
   configured, structured carts must identify every product. See bump-offer-diagnosis.md.
 - Quantity must be positive integer, <=10000 total. Amount is numeric/nonnegative.
 - Missing shipping is recorded at intake and checked before submission by the job.
+- Lulu shipping streets are normalized/split losslessly into two <=30-character
+  lines by LuluApiService::normalizeShippingAddress, before the submission marker.
+  Existing street2 is retained after overflow. Unrepresentable addresses fail
+  locally; cost and print share formatting. Original addresses are not rewritten.
+- Additional amount aliases total_price/total_cart_price support the actual funnel
+  payload. These are full cart totals, not physical revenue or independent payment
+  proof. Existing stored null amounts are not automatically backfilled by retry.
 - US Missouri misspellings normalize to MO; explicit MI remains Michigan.
 
 Responses: 202 queued; 200 duplicate_ignored; 401 wrong secret; 503 missing deployed
@@ -169,6 +177,11 @@ Contact fields: Lulu Status (contact.lulu_status) and Lulu Job ID
 Scopes used for diagnostics and updates: contacts.readonly, contacts.write,
 locations/customFields.readonly. Contact fields are one shared pair per buyer:
 they are not per-order records for repeat purchases. Full order history stays here.
+
+Order 61 recovery: see [incident runbook](order-61-recovery-2026-11-19.md).
+Copied live HTTP 400 responses explain the address issue; do not replay the webhook
+or bulk retry. Confirm no manual/accepted Lulu job, inspect selection and prepared
+address, then use the existing guarded Retry Fulfillment once after deployment.
 
 ## Workstation setup and verification
 
